@@ -9,8 +9,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('trading_bots', function (Blueprint $table) {
-            $table->foreignId('api_key_id')->nullable()->after('user_id')->constrained()->onDelete('set null');
-            $table->foreignId('user_id')->nullable()->after('id')->constrained()->onDelete('cascade');
+            $table->unsignedBigInteger('user_id')->nullable();
+            $table->unsignedBigInteger('api_key_id')->nullable()->after('user_id');
             
             // Remove old API fields
             $table->dropColumn(['api_key', 'api_secret', 'passphrase']);
