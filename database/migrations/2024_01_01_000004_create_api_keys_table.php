@@ -10,14 +10,14 @@ return new class extends Migration
     {
         Schema::create('api_keys', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->onDelete('cascade');
+            $table->unsignedBigInteger('user_id');
             $table->enum('exchange', ['kucoin', 'binance']);
             $table->string('name');
-            $table->text('api_key'); // Encrypted
-            $table->text('api_secret'); // Encrypted
-            $table->text('passphrase')->nullable(); // Encrypted (KuCoin only)
+            $table->text('api_key');
+            $table->text('api_secret');
+            $table->text('passphrase')->nullable();
             $table->boolean('is_active')->default(true);
-            $table->json('permissions')->default('["read"]');
+            $table->json('permissions');
             $table->timestamp('last_used_at')->nullable();
             $table->text('notes')->nullable();
             $table->timestamps();
