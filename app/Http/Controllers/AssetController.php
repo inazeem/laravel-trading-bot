@@ -24,20 +24,154 @@ class AssetController extends Controller
 
     public function portfolio()
     {
-        $holdings = Auth::user()->assetHoldings()
+        // Get local holdings from database
+        $localHoldings = Auth::user()->assetHoldings()
             ->with('asset')
             ->where('quantity', '>', 0)
             ->get()
             ->filter(function ($holding) {
                 return $holding->current_value > 10; // Only show holdings worth more than $10
-            })
-            ->sortByDesc('current_value');
+            });
 
+        // Get all active API keys
+        $apiKeys = Auth::user()->apiKeys()->where('is_active', true)->get();
+        
+        // Fetch assets from all exchanges
+        $exchangeAssets = collect();
+        $exchangeBalances = collect();
+        
+        foreach ($apiKeys as $apiKey) {
+            try {
+                \Log::info("Fetching balance from exchange", [
+                    'exchange' => $apiKey->exchange,
+                    'api_key_name' => $apiKey->name
+                ]);
+                
+                $exchangeService = new ExchangeService($apiKey);
+                $balances = $exchangeService->getBalance();
+                
+                \Log::info("Raw balance response", [
+                    'exchange' => $apiKey->exchange,
+                    'balances' => $balances
+                ]);
+                
+                if (is_array($balances)) {
+                    foreach ($balances as $balance) {
+                        // Skip zero balances and small amounts
+                        if (isset($balance['available']) && $balance['available'] > 0) {
+                            $balance['exchange'] = $apiKey->exchange;
+                            $balance['api_key_name'] = $apiKey->name;
+                            $exchangeBalances->push($balance);
+                            
+                            \Log::info("Added balance", [
+                                'currency' => $balance['currency'] ?? 'unknown',
+                                'available' => $balance['available'],
+                                'exchange' => $apiKey->exchange
+                            ]);
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                \Log::error("Error fetching balance from {$apiKey->exchange}: " . $e->getMessage());
+                continue;
+            }
+        }
+        
+        \Log::info("Total exchange balances found", ['count' => $exchangeBalances->count()]);
+
+        // Combine local holdings with exchange assets
+        $allHoldings = collect();
+        
+        // Add local holdings
+        foreach ($localHoldings as $holding) {
+            $allHoldings->push([
+                'type' => 'local',
+                'symbol' => $holding->asset->symbol,
+                'name' => $holding->asset->name,
+                'quantity' => $holding->quantity,
+                'current_price' => $holding->asset->current_price,
+                'current_value' => $holding->current_value,
+                'total_invested' => $holding->total_invested,
+                'profit_loss' => $holding->profit_loss,
+                'profit_loss_percentage' => $holding->profit_loss_percentage,
+                'exchange' => 'Local Database',
+                'api_key_name' => 'Manual Entry'
+            ]);
+        }
+        
+        // Add exchange assets
+        foreach ($exchangeBalances as $balance) {
+            $currency = $balance['currency'] ?? $balance['asset'] ?? 'Unknown';
+            $available = $balance['available'] ?? $balance['free'] ?? 0;
+            $total = $balance['total'] ?? $balance['balance'] ?? $available;
+            
+            // Skip very small amounts (less than $1 equivalent)
+            if ($available <= 0.001) {
+                continue;
+            }
+            
+            // Get current price for the asset
+            $currentPrice = 0;
+            $assetName = $currency;
+            
+            // Try to get asset info from database
+            $asset = Asset::where('symbol', $currency)->orWhere('symbol', $currency . '-USDT')->first();
+            if ($asset) {
+                $currentPrice = $asset->current_price;
+                $assetName = $asset->name;
+            } else {
+                // For USDT, use 1:1 ratio
+                if ($currency === 'USDT') {
+                    $currentPrice = 1;
+                }
+            }
+            
+            $currentValue = $available * $currentPrice;
+            
+            // Only include if worth more than $1
+            if ($currentValue >= 1) {
+                $allHoldings->push([
+                    'type' => 'exchange',
+                    'symbol' => $currency,
+                    'name' => $assetName,
+                    'quantity' => $available,
+                    'current_price' => $currentPrice,
+                    'current_value' => $currentValue,
+                    'total_invested' => 0, // We don't have this info from exchange
+                    'profit_loss' => 0, // We don't have this info from exchange
+                    'profit_loss_percentage' => 0, // We don't have this info from exchange
+                    'exchange' => ucfirst($balance['exchange']),
+                    'api_key_name' => $balance['api_key_name']
+                ]);
+            }
+        }
+        
+        // Sort by current value (highest first)
+        $holdings = $allHoldings->sortByDesc('current_value');
+        
+        // Calculate totals
         $totalPortfolioValue = $holdings->sum('current_value');
         $totalInvested = $holdings->sum('total_invested');
         $totalProfitLoss = $totalPortfolioValue - $totalInvested;
+        
+        // Group by exchange for summary
+        $exchangeSummary = $holdings->groupBy('exchange')->map(function ($group) {
+            return [
+                'count' => $group->count(),
+                'total_value' => $group->sum('current_value'),
+                'total_invested' => $group->sum('total_invested'),
+                'profit_loss' => $group->sum('profit_loss')
+            ];
+        });
 
-        return view('assets.portfolio', compact('holdings', 'totalPortfolioValue', 'totalInvested', 'totalProfitLoss'));
+        return view('assets.portfolio', compact(
+            'holdings', 
+            'totalPortfolioValue', 
+            'totalInvested', 
+            'totalProfitLoss',
+            'exchangeSummary',
+            'apiKeys'
+        ));
     }
 
     public function buy(Request $request)
@@ -290,6 +424,64 @@ class AssetController extends Controller
             return response()->json([
                 'success' => false,
                 'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function refreshPortfolio()
+    {
+        try {
+            $apiKeys = Auth::user()->apiKeys()->where('is_active', true)->get();
+            $updatedCount = 0;
+            $errors = [];
+
+            foreach ($apiKeys as $apiKey) {
+                try {
+                    $exchangeService = new ExchangeService($apiKey);
+                    $balances = $exchangeService->getBalance();
+                    
+                    if (is_array($balances)) {
+                        foreach ($balances as $balance) {
+                            if (isset($balance['available']) && $balance['available'] > 0) {
+                                $currency = $balance['currency'] ?? $balance['asset'] ?? 'Unknown';
+                                
+                                // Try to find or create asset
+                                $asset = Asset::where('symbol', $currency)
+                                    ->orWhere('symbol', $currency . '-USDT')
+                                    ->first();
+                                
+                                if (!$asset) {
+                                    // Create basic asset record
+                                    $asset = Asset::create([
+                                        'symbol' => $currency,
+                                        'name' => $currency,
+                                        'type' => 'crypto',
+                                        'current_price' => $currency === 'USDT' ? 1 : 0,
+                                        'is_active' => true
+                                    ]);
+                                }
+                                
+                                $updatedCount++;
+                            }
+                        }
+                    }
+                } catch (\Exception $e) {
+                    $errors[] = "Error updating {$apiKey->exchange}: " . $e->getMessage();
+                    \Log::error("Error refreshing portfolio for {$apiKey->exchange}: " . $e->getMessage());
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => "Portfolio refreshed successfully. Updated {$updatedCount} assets.",
+                'updated_count' => $updatedCount,
+                'errors' => $errors
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to refresh portfolio: ' . $e->getMessage()
             ], 500);
         }
     }

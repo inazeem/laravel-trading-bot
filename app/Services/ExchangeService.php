@@ -309,7 +309,41 @@ class ExchangeService
         ])->get('https://api.kucoin.com' . $endpoint);
         
         if ($response->successful()) {
-            return $response->json()['data'];
+            $data = $response->json();
+            
+            // Log the response for debugging
+            \Log::info("KuCoin balance response", ['data' => $data]);
+            
+            if (isset($data['data']) && is_array($data['data'])) {
+                $balances = [];
+                
+                foreach ($data['data'] as $account) {
+                    // Only include trading accounts with balances
+                    if (isset($account['type']) && $account['type'] === 'trade') {
+                        $currency = $account['currency'] ?? '';
+                        $available = (float) ($account['available'] ?? 0);
+                        $total = (float) ($account['balance'] ?? 0);
+                        
+                        if ($available > 0 || $total > 0) {
+                            $balances[] = [
+                                'currency' => $currency,
+                                'available' => $available,
+                                'total' => $total,
+                                'balance' => $total,
+                                'free' => $available
+                            ];
+                        }
+                    }
+                }
+                
+                \Log::info("KuCoin processed balances", ['balances' => $balances]);
+                return $balances;
+            }
+        } else {
+            \Log::error("KuCoin balance request failed", [
+                'status' => $response->status(),
+                'body' => $response->body()
+            ]);
         }
         
         return [];

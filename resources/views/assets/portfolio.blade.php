@@ -5,6 +5,12 @@
                 {{ __('My Portfolio') }}
             </h2>
             <div class="flex space-x-4">
+                <button onclick="refreshPortfolio()" class="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded flex items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    Refresh
+                </button>
                 <a href="{{ route('assets.index') }}" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
                     Trade Assets
                 </a>
@@ -91,7 +97,7 @@
                             </div>
                             <div class="ml-5 w-0 flex-1">
                                 <dl>
-                                    <dt class="text-sm font-medium text-gray-500 truncate">Assets (>$10)</dt>
+                                    <dt class="text-sm font-medium text-gray-500 truncate">Total Assets</dt>
                                     <dd class="text-lg font-medium text-gray-900">{{ $holdings->count() }}</dd>
                                 </dl>
                             </div>
@@ -100,11 +106,48 @@
                 </div>
             </div>
 
+            <!-- Exchange Summary -->
+            @if($exchangeSummary->count() > 0)
+            <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg mb-8">
+                <div class="p-6">
+                    <h3 class="text-lg font-semibold mb-4">Portfolio by Exchange</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        @foreach($exchangeSummary as $exchange => $summary)
+                        <div class="border rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <h4 class="font-medium text-gray-900">{{ $exchange }}</h4>
+                                <span class="text-sm text-gray-500">{{ $summary['count'] }} assets</span>
+                            </div>
+                            <div class="space-y-1">
+                                <div class="flex justify-between">
+                                    <span class="text-sm text-gray-600">Total Value:</span>
+                                    <span class="text-sm font-medium">${{ number_format($summary['total_value'], 2) }}</span>
+                                </div>
+                                @if($summary['total_invested'] > 0)
+                                <div class="flex justify-between">
+                                    <span class="text-sm text-gray-600">Invested:</span>
+                                    <span class="text-sm font-medium">${{ number_format($summary['total_invested'], 2) }}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-sm text-gray-600">P&L:</span>
+                                    <span class="text-sm font-medium {{ $summary['profit_loss'] >= 0 ? 'text-green-600' : 'text-red-600' }}">
+                                        {{ $summary['profit_loss'] >= 0 ? '+' : '' }}${{ number_format($summary['profit_loss'], 2) }}
+                                    </span>
+                                </div>
+                                @endif
+                            </div>
+                        </div>
+                        @endforeach
+                    </div>
+                </div>
+            </div>
+            @endif
+
             @if($holdings->count() > 0)
                 <!-- Assets Table -->
                 <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                     <div class="p-6 text-gray-900">
-                        <h3 class="text-lg font-semibold mb-4">Assets Worth More Than $10</h3>
+                        <h3 class="text-lg font-semibold mb-4">All Assets</h3>
                         <div class="overflow-x-auto">
                             <table class="min-w-full divide-y divide-gray-200">
                                 <thead class="bg-gray-50">
@@ -113,10 +156,10 @@
                                             Asset
                                         </th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Quantity
+                                            Exchange
                                         </th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Avg Buy Price
+                                            Quantity
                                         </th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Current Price
@@ -144,54 +187,78 @@
                                             <td class="px-6 py-4 whitespace-nowrap">
                                                 <div class="flex items-center">
                                                     <div class="flex-shrink-0 h-10 w-10">
-                                                        <div class="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                                                            <span class="text-sm font-medium text-blue-800">
-                                                                {{ substr($holding->asset->symbol, 0, 2) }}
+                                                        <div class="h-10 w-10 rounded-full {{ $holding['type'] === 'exchange' ? 'bg-green-100' : 'bg-blue-100' }} flex items-center justify-center">
+                                                            <span class="text-sm font-medium {{ $holding['type'] === 'exchange' ? 'text-green-800' : 'text-blue-800' }}">
+                                                                {{ substr($holding['symbol'], 0, 2) }}
                                                             </span>
                                                         </div>
                                                     </div>
                                                     <div class="ml-4">
                                                         <div class="text-sm font-medium text-gray-900">
-                                                            {{ $holding->asset->formatted_symbol }}
+                                                            {{ $holding['symbol'] }}
                                                         </div>
                                                         <div class="text-sm text-gray-500">
-                                                            {{ $holding->asset->name }}
+                                                            {{ $holding['name'] }}
                                                         </div>
+                                                        @if($holding['type'] === 'exchange')
+                                                        <div class="text-xs text-gray-400">
+                                                            {{ $holding['api_key_name'] }}
+                                                        </div>
+                                                        @endif
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                {{ $holding->formatted_quantity }}
+                                            <td class="px-6 py-4 whitespace-nowrap">
+                                                <span class="inline-flex px-2 py-1 text-xs font-semibold rounded-full 
+                                                    {{ $holding['type'] === 'exchange' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800' }}">
+                                                    {{ $holding['exchange'] }}
+                                                </span>
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                {{ $holding->formatted_average_buy_price }}
+                                                {{ number_format($holding['quantity'], 8) }}
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                {{ $holding->asset->formatted_price }}
+                                                ${{ number_format($holding['current_price'], 4) }}
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                {{ $holding->formatted_current_value }}
+                                                ${{ number_format($holding['current_value'], 2) }}
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                {{ $holding->formatted_total_invested }}
+                                                @if($holding['total_invested'] > 0)
+                                                    ${{ number_format($holding['total_invested'], 2) }}
+                                                @else
+                                                    <span class="text-gray-400">-</span>
+                                                @endif
                                             </td>
-                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium {{ $holding->profit_loss >= 0 ? 'text-green-600' : 'text-red-600' }}">
-                                                {{ $holding->formatted_profit_loss }}
+                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium {{ $holding['profit_loss'] >= 0 ? 'text-green-600' : 'text-red-600' }}">
+                                                @if($holding['total_invested'] > 0)
+                                                    {{ $holding['profit_loss'] >= 0 ? '+' : '' }}${{ number_format($holding['profit_loss'], 2) }}
+                                                @else
+                                                    <span class="text-gray-400">-</span>
+                                                @endif
                                             </td>
-                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium {{ $holding->profit_loss_percentage >= 0 ? 'text-green-600' : 'text-red-600' }}">
-                                                {{ $holding->formatted_profit_loss_percentage }}
+                                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium {{ $holding['profit_loss_percentage'] >= 0 ? 'text-green-600' : 'text-red-600' }}">
+                                                @if($holding['total_invested'] > 0)
+                                                    {{ $holding['profit_loss_percentage'] >= 0 ? '+' : '' }}{{ number_format($holding['profit_loss_percentage'], 2) }}%
+                                                @else
+                                                    <span class="text-gray-400">-</span>
+                                                @endif
                                             </td>
                                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                @if($holding['type'] === 'local')
                                                 <div class="flex space-x-2">
-                                                    <button onclick="openBuyModal('{{ $holding->asset->id }}', '{{ $holding->asset->symbol }}', '{{ $holding->asset->current_price }}')" 
+                                                    <button onclick="openBuyModal('{{ $holding['symbol'] }}', '{{ $holding['symbol'] }}', '{{ $holding['current_price'] }}')" 
                                                             class="text-green-600 hover:text-green-900 bg-green-100 hover:bg-green-200 px-2 py-1 rounded text-xs">
                                                         Buy More
                                                     </button>
-                                                    <button onclick="openSellModal('{{ $holding->asset->id }}', '{{ $holding->asset->symbol }}', '{{ $holding->asset->current_price }}', '{{ $holding->quantity }}')" 
+                                                    <button onclick="openSellModal('{{ $holding['symbol'] }}', '{{ $holding['symbol'] }}', '{{ $holding['current_price'] }}', '{{ $holding['quantity'] }}')" 
                                                             class="text-red-600 hover:text-red-900 bg-red-100 hover:bg-red-200 px-2 py-1 rounded text-xs">
                                                         Sell
                                                     </button>
                                                 </div>
+                                                @else
+                                                <span class="text-gray-400 text-xs">Exchange Asset</span>
+                                                @endif
                                             </td>
                                         </tr>
                                     @endforeach
@@ -207,9 +274,12 @@
                         <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
                         </svg>
-                        <h3 class="mt-2 text-sm font-medium text-gray-900">No assets worth more than $10</h3>
-                        <p class="mt-1 text-sm text-gray-500">Start trading to build your portfolio!</p>
-                        <div class="mt-6">
+                        <h3 class="mt-2 text-sm font-medium text-gray-900">No assets found</h3>
+                        <p class="mt-1 text-sm text-gray-500">Add API keys or start trading to see your portfolio!</p>
+                        <div class="mt-6 space-x-4">
+                            <a href="{{ route('api-keys.index') }}" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700">
+                                Add API Keys
+                            </a>
                             <a href="{{ route('assets.index') }}" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
                                 Start Trading
                             </a>
@@ -414,6 +484,31 @@
             }
             if (event.target === sellModal) {
                 closeSellModal();
+            }
+        }
+
+        function refreshPortfolio() {
+            if (confirm('Are you sure you want to refresh the portfolio from exchanges? This will update your holdings and balances.')) {
+                fetch('{{ route('assets.refresh') }}', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                        'Accept': 'application/json',
+                    },
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Portfolio refreshed successfully!');
+                        location.reload(); // Reload the page to show updated data
+                    } else {
+                        alert('Failed to refresh portfolio: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error refreshing portfolio:', error);
+                    alert('An error occurred while refreshing the portfolio.');
+                });
             }
         }
     </script>

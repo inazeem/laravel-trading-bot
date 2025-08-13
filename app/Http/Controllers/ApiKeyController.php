@@ -141,23 +141,46 @@ class ApiKeyController extends Controller
             $exchangeService = new \App\Services\ExchangeService($apiKey);
             
             // Test connection by getting account balance
-            $balance = $exchangeService->getAccountBalance();
+            $balance = $exchangeService->getBalance();
             
-            if (!empty($balance)) {
+            \Log::info("API key connection test", [
+                'api_key_id' => $apiKey->id,
+                'exchange' => $apiKey->exchange,
+                'balance_count' => is_array($balance) ? count($balance) : 0,
+                'balance' => $balance
+            ]);
+            
+            if (is_array($balance) && !empty($balance)) {
+                $totalAssets = count($balance);
+                $totalValue = 0;
+                
+                foreach ($balance as $asset) {
+                    $available = $asset['available'] ?? $asset['free'] ?? 0;
+                    $totalValue += $available;
+                }
+                
                 return response()->json([
                     'success' => true,
-                    'message' => 'Connection successful',
-                    'balance' => $balance
+                    'message' => "Connection successful - Found {$totalAssets} assets with total balance",
+                    'balance' => $balance,
+                    'total_assets' => $totalAssets,
+                    'total_value' => $totalValue
                 ]);
             } else {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Connection failed - no balance data received'
+                    'message' => 'Connection failed - no balance data received. Please check your API credentials and permissions.'
                 ]);
             }
             
         } catch (\Exception $e) {
-            Log::error('API key connection test failed: ' . $e->getMessage());
+            \Log::error('API key connection test failed', [
+                'api_key_id' => $apiKey->id,
+                'exchange' => $apiKey->exchange,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
             return response()->json([
                 'success' => false,
                 'message' => 'Connection failed: ' . $e->getMessage()

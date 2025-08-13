@@ -62,6 +62,7 @@ Route::get('trading-bots/{tradingBot}/logs', [TradingBotController::class, 'logs
     // Asset trading routes
     Route::get('assets', [AssetController::class, 'index'])->name('assets.index');
     Route::get('assets/portfolio', [AssetController::class, 'portfolio'])->name('assets.portfolio');
+    Route::post('assets/refresh', [AssetController::class, 'refreshPortfolio'])->name('assets.refresh');
     Route::post('assets/buy', [AssetController::class, 'buy'])->name('assets.buy');
     Route::post('assets/sell', [AssetController::class, 'sell'])->name('assets.sell');
     Route::get('assets/transactions', [AssetController::class, 'transactions'])->name('assets.transactions');
