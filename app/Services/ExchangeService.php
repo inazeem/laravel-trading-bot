@@ -125,6 +125,14 @@ class ExchangeService
     }
 
     /**
+     * Get balance (alias for getAccountBalance)
+     */
+    public function getBalance()
+    {
+        return $this->getAccountBalance();
+    }
+
+    /**
      * Get candlestick data for a symbol
      */
     public function getCandles($symbol, $interval = '1h', $limit = 500)

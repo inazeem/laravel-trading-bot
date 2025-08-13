@@ -218,7 +218,7 @@ class TradingBotService
         $positionSize = $this->calculatePositionSize($currentPrice);
         
         if ($positionSize <= 0) {
-            Log::warning("Insufficient balance for trade");
+            Log::warning("Insufficient balance for trade - Position size calculated as: {$positionSize}");
             return;
         }
         
@@ -275,7 +275,10 @@ class TradingBotService
             }
         }
         
+        Log::info("Balance calculation: USDT Balance = {$usdtBalance}, Current Price = {$currentPrice}");
+        
         if ($usdtBalance <= 0) {
+            Log::warning("No USDT balance available");
             return 0;
         }
         
@@ -283,10 +286,18 @@ class TradingBotService
         $riskAmount = $usdtBalance * ($this->bot->risk_percentage / 100);
         $positionSize = $riskAmount / $currentPrice;
         
+        Log::info("Position size calculation: Risk Amount = {$riskAmount} USDT, Position Size = {$positionSize} BTC");
+        
         // Apply maximum position size limit
         $maxPositionSize = $this->bot->max_position_size;
         if ($positionSize > $maxPositionSize) {
             $positionSize = $maxPositionSize;
+            Log::info("Position size limited by max position size: {$positionSize}");
+        }
+        
+        // Check if position size is too small (likely below exchange minimum)
+        if ($positionSize < 0.001) {
+            Log::warning("Position size too small: {$positionSize} BTC. This may be below exchange minimum order size.");
         }
         
         return $positionSize;
