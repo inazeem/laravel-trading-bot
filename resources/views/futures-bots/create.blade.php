@@ -1,14 +1,21 @@
-@extends('layouts.app')
-
-@section('content')
-<div class="container mx-auto px-4 py-8">
-    <div class="max-w-4xl mx-auto">
-        <div class="flex items-center mb-8">
-            <a href="{{ route('futures-bots.index') }}" class="text-blue-600 hover:text-blue-800 mr-4">
-                <i class="fas fa-arrow-left"></i> Back to Bots
-            </a>
-            <h1 class="text-3xl font-bold text-gray-900">Create Futures Trading Bot</h1>
+<x-app-layout>
+    <x-slot name="header">
+        <div class="flex justify-between items-center">
+            <h2 class="font-semibold text-xl text-gray-800 leading-tight">
+                {{ __('Create Futures Trading Bot') }}
+            </h2>
         </div>
+    </x-slot>
+    <div class="py-12">
+        <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+            <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
+                <div class="p-6 text-gray-900">
+                    <div class="flex items-center mb-8">
+                        <a href="{{ route('futures-bots.index') }}" class="text-blue-600 hover:text-blue-800 mr-4">
+                            <i class="fas fa-arrow-left"></i> Back to Bots
+                        </a>
+                        <h1 class="text-3xl font-bold text-gray-900">Create Futures Trading Bot</h1>
+                    </div>
 
         @if(session('error'))
             <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
@@ -16,7 +23,7 @@
             </div>
         @endif
 
-        <div class="bg-white rounded-lg shadow-lg border border-gray-200 p-6">
+                    <div class="bg-white rounded-lg shadow-lg border border-gray-200 p-6">
             <form method="POST" action="{{ route('futures-bots.store') }}">
                 @csrf
 
@@ -189,7 +196,9 @@
                     </button>
                 </div>
             </form>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
-</div>
-@endsection
+</x-app-layout>

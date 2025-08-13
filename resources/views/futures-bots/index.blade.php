@@ -1,27 +1,30 @@
-@extends('layouts.app')
-
-@section('content')
-<div class="container mx-auto px-4 py-8">
-    <div class="flex justify-between items-center mb-8">
-        <h1 class="text-3xl font-bold text-gray-900">Futures Trading Bots</h1>
-        <a href="{{ route('futures-bots.create') }}" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
-            <i class="fas fa-plus mr-2"></i>Create New Bot
-        </a>
-    </div>
-
-    @if(session('success'))
-        <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-6">
-            {{ session('success') }}
+<x-app-layout>
+    <x-slot name="header">
+        <div class="flex justify-between items-center">
+            <h2 class="font-semibold text-xl text-gray-800 leading-tight">
+                {{ __('Futures Trading Bots') }}
+            </h2>
+            <a href="{{ route('futures-bots.create') }}" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                <i class="fas fa-plus mr-2"></i>Create New Bot
+            </a>
         </div>
-    @endif
+    </x-slot>
+    <div class="py-12">
+        <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
 
-    @if(session('error'))
-        <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
-            {{ session('error') }}
-        </div>
-    @endif
+            @if(session('success'))
+                <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-6">
+                    {{ session('success') }}
+                </div>
+            @endif
 
-    @if($bots->isEmpty())
+            @if(session('error'))
+                <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+                    {{ session('error') }}
+                </div>
+            @endif
+
+            @if($bots->isEmpty())
         <div class="text-center py-12">
             <div class="text-gray-500 text-lg mb-4">
                 <i class="fas fa-robot text-6xl mb-4"></i>
@@ -148,7 +151,7 @@
                     </div>
                 </div>
             @endforeach
+            @endif
         </div>
-    @endif
-</div>
-@endsection
+    </div>
+</x-app-layout>

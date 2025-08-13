@@ -56,6 +56,11 @@ class FuturesTradingBot extends Model
         return $this->belongsTo(ApiKey::class);
     }
 
+    public function logs()
+    {
+        return $this->hasMany(TradingBotLog::class, 'futures_trading_bot_id');
+    }
+
     public function openTrades(): HasMany
     {
         return $this->trades()->where('status', 'open');

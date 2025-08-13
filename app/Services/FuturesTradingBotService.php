@@ -6,7 +6,7 @@ use App\Models\FuturesTradingBot;
 use App\Models\FuturesTrade;
 use App\Models\FuturesSignal;
 use Illuminate\Support\Facades\Log;
-use App\Services\TradingBotLogger;
+use App\Services\FuturesTradingBotLogger;
 use Illuminate\Support\Facades\DB;
 
 class FuturesTradingBotService
@@ -14,7 +14,7 @@ class FuturesTradingBotService
     private FuturesTradingBot $bot;
     private ExchangeService $exchangeService;
     private SmartMoneyConceptsService $smcService;
-    private TradingBotLogger $logger;
+    private FuturesTradingBotLogger $logger;
     private array $timeframeIntervals = [
         '1m' => '1minute',
         '5m' => '5minute', 
@@ -25,7 +25,7 @@ class FuturesTradingBotService
     {
         $this->bot = $bot->load('apiKey');
         $this->exchangeService = new ExchangeService($bot->apiKey);
-        $this->logger = new TradingBotLogger($bot);
+        $this->logger = new FuturesTradingBotLogger($bot);
     }
 
     /**
@@ -479,7 +479,7 @@ class FuturesTradingBotService
     /**
      * Close position
      */
-    private function closePosition(FuturesTrade $trade, float $currentPrice): void
+    public function closePosition(FuturesTrade $trade, float $currentPrice): void
     {
         try {
             $side = $trade->isLong() ? 'sell' : 'buy';
