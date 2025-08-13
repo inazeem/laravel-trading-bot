@@ -133,6 +133,26 @@ class ExchangeService
     }
 
     /**
+     * Place market order (buy or sell)
+     */
+    public function placeMarketOrder($symbol, $side, $quantity): ?array
+    {
+        try {
+            switch ($side) {
+                case 'buy':
+                    return $this->placeBuyOrder($symbol, $quantity);
+                case 'sell':
+                    return $this->placeSellOrder($symbol, $quantity);
+                default:
+                    throw new \Exception("Invalid order side: {$side}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error placing market order: " . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
      * Get candlestick data for a symbol
      */
     public function getCandles($symbol, $interval = '1h', $limit = 500)
@@ -221,7 +241,13 @@ class ExchangeService
         ])->post('https://api.kucoin.com' . $endpoint, $params);
         
         if ($response->successful()) {
-            return $response->json();
+            $data = $response->json();
+            return [
+                'order_id' => $data['data']['orderId'],
+                'side' => 'buy',
+                'symbol' => $symbol,
+                'quantity' => $quantity
+            ];
         }
         
         throw new \Exception("KuCoin buy order failed: " . $response->body());
@@ -255,7 +281,13 @@ class ExchangeService
         ])->post('https://api.kucoin.com' . $endpoint, $params);
         
         if ($response->successful()) {
-            return $response->json();
+            $data = $response->json();
+            return [
+                'order_id' => $data['data']['orderId'],
+                'side' => 'sell',
+                'symbol' => $symbol,
+                'quantity' => $quantity
+            ];
         }
         
         throw new \Exception("KuCoin sell order failed: " . $response->body());
@@ -366,7 +398,13 @@ class ExchangeService
         ])->post('https://api.binance.com' . $endpoint, $params);
         
         if ($response->successful()) {
-            return $response->json();
+            $data = $response->json();
+            return [
+                'order_id' => $data['orderId'],
+                'side' => 'buy',
+                'symbol' => $symbol,
+                'quantity' => $quantity
+            ];
         }
         
         throw new \Exception("Binance buy order failed: " . $response->body());
@@ -399,7 +437,13 @@ class ExchangeService
         ])->post('https://api.binance.com' . $endpoint, $params);
         
         if ($response->successful()) {
-            return $response->json();
+            $data = $response->json();
+            return [
+                'order_id' => $data['orderId'],
+                'side' => 'sell',
+                'symbol' => $symbol,
+                'quantity' => $quantity
+            ];
         }
         
         throw new \Exception("Binance sell order failed: " . $response->body());
