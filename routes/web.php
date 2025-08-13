@@ -71,4 +71,37 @@ Route::get('trading-bots/{tradingBot}/logs', [TradingBotController::class, 'logs
     Route::post('assets/balance', [AssetController::class, 'getBalance'])->name('assets.balance');
 });
 
+// Custom endpoint for external cron services to trigger trading bot
+Route::get('cron/trading-bot', function () {
+    try {
+        // Run the trading bot command
+        \Artisan::call('trading:run', ['--all' => true]);
+        
+        $output = \Artisan::output();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Trading bot executed successfully',
+            'output' => $output,
+            'timestamp' => now()->toISOString()
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Error executing trading bot',
+            'error' => $e->getMessage(),
+            'timestamp' => now()->toISOString()
+        ], 500);
+    }
+})->name('cron.trading-bot');
+
+// Health check endpoint for uptime monitors
+Route::get('health', function () {
+    return response()->json([
+        'status' => 'healthy',
+        'timestamp' => now()->toISOString(),
+        'trading_bot_status' => 'active'
+    ]);
+})->name('health');
+
 require __DIR__.'/auth.php';
