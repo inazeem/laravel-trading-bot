@@ -6,6 +6,7 @@ use App\Models\TradingBot;
 use App\Models\Trade;
 use App\Models\Signal;
 use Illuminate\Support\Facades\Log;
+use App\Services\TradingBotLogger;
 use Illuminate\Support\Facades\DB;
 
 class TradingBotService
@@ -13,6 +14,7 @@ class TradingBotService
     private TradingBot $bot;
     private ExchangeService $exchangeService;
     private SmartMoneyConceptsService $smcService;
+    private TradingBotLogger $logger;
     private array $timeframeIntervals = [
         '1h' => '1hour',
         '4h' => '4hour', 
@@ -22,12 +24,8 @@ class TradingBotService
     public function __construct(TradingBot $bot)
     {
         $this->bot = $bot->load('apiKey');
-        $this->exchangeService = new ExchangeService(
-            $bot->exchange,
-            $bot->apiKey->decrypted_api_key,
-            $bot->apiKey->decrypted_api_secret,
-            $bot->apiKey->decrypted_passphrase
-        );
+        $this->exchangeService = new ExchangeService($bot->apiKey);
+        $this->logger = new TradingBotLogger($bot);
     }
 
     /**
@@ -36,39 +34,39 @@ class TradingBotService
     public function run(): void
     {
         try {
-            Log::info("🚀 [BOT START] Trading bot '{$this->bot->name}' starting execution");
-            Log::info("📊 [CONFIG] Symbol: {$this->bot->symbol}, Exchange: {$this->bot->exchange}");
-            Log::info("⚙️ [CONFIG] Risk: {$this->bot->risk_percentage}%, Max Position: {$this->bot->max_position_size}");
-            Log::info("⏰ [CONFIG] Timeframes: " . implode(', ', $this->bot->timeframes));
+            $this->logger->info("🚀 [BOT START] Trading bot '{$this->bot->name}' starting execution");
+            $this->logger->info("📊 [CONFIG] Symbol: {$this->bot->symbol}, Exchange: {$this->bot->exchange}");
+            $this->logger->info("⚙️ [CONFIG] Risk: {$this->bot->risk_percentage}%, Max Position: {$this->bot->max_position_size}");
+            $this->logger->info("⏰ [CONFIG] Timeframes: " . implode(', ', $this->bot->timeframes));
             
             // Update bot status
             $this->bot->update(['status' => 'running', 'last_run_at' => now()]);
             
             // Get current price
-            Log::info("💰 [PRICE] Fetching current price for {$this->bot->symbol}...");
+            $this->logger->info("💰 [PRICE] Fetching current price for {$this->bot->symbol}...");
             $currentPrice = $this->exchangeService->getCurrentPrice($this->bot->symbol);
             if (!$currentPrice) {
-                Log::error("❌ [PRICE] Failed to get current price for {$this->bot->symbol}");
+                $this->logger->error("❌ [PRICE] Failed to get current price for {$this->bot->symbol}");
                 return;
             }
-            Log::info("✅ [PRICE] Current price: $currentPrice");
+            $this->logger->info("✅ [PRICE] Current price: $currentPrice");
             
             // Analyze all timeframes
-            Log::info("🔍 [ANALYSIS] Starting Smart Money Concepts analysis...");
+            $this->logger->info("🔍 [ANALYSIS] Starting Smart Money Concepts analysis...");
             $signals = $this->analyzeAllTimeframes($currentPrice);
             
             // Process signals
-            Log::info("📈 [SIGNALS] Processing " . count($signals) . " total signals...");
+            $this->logger->info("📈 [SIGNALS] Processing " . count($signals) . " total signals...");
             $this->processSignals($signals, $currentPrice);
             
             // Update bot status
             $this->bot->update(['status' => 'idle']);
             
-            Log::info("✅ [BOT END] Trading bot '{$this->bot->name}' completed successfully");
+            $this->logger->info("✅ [BOT END] Trading bot '{$this->bot->name}' completed successfully");
             
         } catch (\Exception $e) {
-            Log::error("❌ [ERROR] Error running trading bot {$this->bot->name}: " . $e->getMessage());
-            Log::error("🔍 [STACK] " . $e->getTraceAsString());
+            $this->logger->error("❌ [ERROR] Error running trading bot {$this->bot->name}: " . $e->getMessage());
+            $this->logger->error("🔍 [STACK] " . $e->getTraceAsString());
             $this->bot->update(['status' => 'error']);
         }
     }
@@ -80,29 +78,29 @@ class TradingBotService
     {
         $allSignals = [];
         
-        Log::info("📊 [TIMEFRAMES] Analyzing " . count($this->bot->timeframes) . " timeframes...");
+        $this->logger->info("📊 [TIMEFRAMES] Analyzing " . count($this->bot->timeframes) . " timeframes...");
         
         foreach ($this->bot->timeframes as $timeframe) {
             $interval = $this->timeframeIntervals[$timeframe] ?? $timeframe;
             
-            Log::info("⏰ [TIMEFRAME] Processing {$timeframe} timeframe (interval: {$interval})...");
+            $this->logger->info("⏰ [TIMEFRAME] Processing {$timeframe} timeframe (interval: {$interval})...");
             
             // Get candlestick data
-            Log::info("📈 [CANDLES] Fetching 500 candlesticks for {$this->bot->symbol} on {$timeframe}...");
+            $this->logger->info("📈 [CANDLES] Fetching 500 candlesticks for {$this->bot->symbol} on {$timeframe}...");
             $candles = $this->exchangeService->getCandles($this->bot->symbol, $interval, 500);
             if (empty($candles)) {
-                Log::warning("⚠️ [CANDLES] No candle data received for {$timeframe} timeframe");
+                $this->logger->warning("⚠️ [CANDLES] No candle data received for {$timeframe} timeframe");
                 continue;
             }
             
-            Log::info("✅ [CANDLES] Received " . count($candles) . " candlesticks for {$timeframe}");
+            $this->logger->info("✅ [CANDLES] Received " . count($candles) . " candlesticks for {$timeframe}");
             
             // Initialize Smart Money Concepts service
-            Log::info("🧠 [SMC] Initializing Smart Money Concepts analysis for {$timeframe}...");
+            $this->logger->info("🧠 [SMC] Initializing Smart Money Concepts analysis for {$timeframe}...");
             $this->smcService = new SmartMoneyConceptsService($candles);
             
             // Generate signals for this timeframe
-            Log::info("🔍 [SIGNALS] Generating signals for {$timeframe} timeframe...");
+            $this->logger->info("🔍 [SIGNALS] Generating signals for {$timeframe} timeframe...");
             $signals = $this->smcService->generateSignals($currentPrice);
             
             foreach ($signals as $signal) {
@@ -110,12 +108,12 @@ class TradingBotService
                 $allSignals[] = $signal;
             }
             
-            Log::info("📊 [SIGNALS] Generated " . count($signals) . " signals for {$timeframe} timeframe");
+            $this->logger->info("📊 [SIGNALS] Generated " . count($signals) . " signals for {$timeframe} timeframe");
             
             // Log signal details
             foreach ($signals as $index => $signal) {
                 $price = $signal['price'] ?? $signal['level'] ?? 'N/A';
-                Log::info("📋 [SIGNAL {$index}] Type: {$signal['type']}, Direction: {$signal['direction']}, Strength: {$signal['strength']}, Price: {$price}");
+                $this->logger->info("📋 [SIGNAL {$index}] Type: {$signal['type']}, Direction: {$signal['direction']}, Strength: {$signal['strength']}, Price: {$price}");
             }
         }
         

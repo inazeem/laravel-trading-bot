@@ -49,4 +49,9 @@ class TradingBot extends Model
     {
         return $this->belongsTo(ApiKey::class);
     }
+
+    public function logs()
+    {
+        return $this->hasMany(TradingBotLog::class);
+    }
 }
