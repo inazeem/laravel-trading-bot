@@ -198,6 +198,19 @@ class TradingBotController extends Controller
         return view('trading-bots.signals', compact('tradingBot', 'signals'));
     }
 
+    public function logs(TradingBot $tradingBot)
+    {
+        // Ensure user can only view their own bot logs
+        if ($tradingBot->user_id !== auth()->id()) {
+            abort(403);
+        }
+        
+        $logs = $tradingBot->logs()->latest()->paginate(50);
+        $summary = (new \App\Services\TradingBotLogger($tradingBot))->getLastRunSummary();
+        
+        return view('trading-bots.logs', compact('tradingBot', 'logs', 'summary'));
+    }
+
     private function calculateWinRate(TradingBot $tradingBot): float
     {
         $closedTrades = $tradingBot->trades()->where('status', 'closed')->get();

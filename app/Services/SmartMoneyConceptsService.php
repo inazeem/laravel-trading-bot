@@ -66,7 +66,7 @@ class SmartMoneyConceptsService
                 $this->swingHighs[] = [
                     'index' => $i,
                     'price' => $candle['high'],
-                    'time' => $candle['time']
+                    'time' => $candle['timestamp']
                 ];
             }
             
@@ -83,7 +83,7 @@ class SmartMoneyConceptsService
                 $this->swingLows[] = [
                     'index' => $i,
                     'price' => $candle['low'],
-                    'time' => $candle['time']
+                    'time' => $candle['timestamp']
                 ];
             }
         }

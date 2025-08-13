@@ -138,15 +138,10 @@ class ApiKeyController extends Controller
         $this->authorize('view', $apiKey);
         
         try {
-            $exchangeService = new \App\Services\ExchangeService(
-                $apiKey->exchange,
-                $apiKey->decrypted_api_key,
-                $apiKey->decrypted_api_secret,
-                $apiKey->decrypted_passphrase
-            );
+            $exchangeService = new \App\Services\ExchangeService($apiKey);
             
             // Test connection by getting account balance
-            $balance = $exchangeService->getBalance();
+            $balance = $exchangeService->getAccountBalance();
             
             if (!empty($balance)) {
                 return response()->json([

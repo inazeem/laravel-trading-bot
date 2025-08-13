@@ -4,408 +4,586 @@ namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Models\Asset;
+use App\Models\ApiKey;
 
 class ExchangeService
 {
-    private string $exchange;
-    private string $apiKey;
-    private string $apiSecret;
-    private ?string $passphrase;
-    private string $baseUrl;
+    protected $apiKey;
+    protected $secretKey;
+    protected $passphrase;
+    protected $exchange;
 
-    public function __construct(string $exchange, string $apiKey, string $apiSecret, ?string $passphrase = null)
+    public function __construct(ApiKey $apiKey = null)
     {
-        $this->exchange = $exchange;
-        $this->apiKey = $apiKey;
-        $this->apiSecret = $apiSecret;
-        $this->passphrase = $passphrase;
-        
-        $this->baseUrl = $this->getBaseUrl();
-    }
-
-    private function getBaseUrl(): string
-    {
-        return match($this->exchange) {
-            'kucoin' => 'https://api.kucoin.com',
-            'binance' => 'https://api.binance.com',
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
+        if ($apiKey) {
+            $this->apiKey = $apiKey->decrypted_api_key;
+            $this->secretKey = $apiKey->decrypted_api_secret;
+            $this->passphrase = $apiKey->decrypted_passphrase;
+            $this->exchange = $apiKey->exchange;
+        }
     }
 
     /**
-     * Get candlestick data
+     * Get available trading pairs from the exchange
      */
-    public function getCandles(string $symbol, string $interval, int $limit = 500): array
+    public function getTradingPairs()
     {
-        $endpoint = $this->getCandlesEndpoint($symbol, $interval, $limit);
-        
-        Log::info("📡 [EXCHANGE] Fetching candles from {$this->exchange} for {$symbol} ({$interval})");
-        Log::info("🔗 [EXCHANGE] Endpoint: {$endpoint}");
-        
         try {
-            $response = Http::get($endpoint);
-            
-            if ($response->successful()) {
-                $candles = $this->formatCandles($response->json());
-                Log::info("✅ [EXCHANGE] Successfully fetched " . count($candles) . " candles from {$this->exchange}");
-                return $candles;
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->getKuCoinTradingPairs();
+                case 'binance':
+                    return $this->getBinanceTradingPairs();
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
             }
-            
-            Log::error("❌ [EXCHANGE] Failed to get candles from {$this->exchange}", [
-                'symbol' => $symbol,
-                'interval' => $interval,
-                'response' => $response->body()
-            ]);
-            
-            return [];
         } catch (\Exception $e) {
-            Log::error("❌ [EXCHANGE] Exception getting candles from {$this->exchange}", [
-                'symbol' => $symbol,
-                'interval' => $interval,
-                'error' => $e->getMessage()
-            ]);
-            
+            Log::error("Error fetching trading pairs: " . $e->getMessage());
             return [];
         }
     }
 
-    private function getCandlesEndpoint(string $symbol, string $interval, int $limit): string
+    /**
+     * Get current price for a trading pair
+     */
+    public function getCurrentPrice($symbol)
     {
-        return match($this->exchange) {
-            'kucoin' => "{$this->baseUrl}/api/v1/market/candles?type={$interval}&symbol={$symbol}&limit={$limit}",
-            'binance' => "{$this->baseUrl}/api/v3/klines?symbol={$symbol}&interval={$interval}&limit={$limit}",
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
-    }
-
-    private function formatCandles(array $data): array
-    {
-        return match($this->exchange) {
-            'kucoin' => $this->formatKucoinCandles($data),
-            'binance' => $this->formatBinanceCandles($data),
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
-    }
-
-    private function formatKucoinCandles(array $data): array
-    {
-        $candles = [];
-        
-        foreach ($data['data'] as $candle) {
-            $candles[] = [
-                'time' => $candle[0],
-                'open' => (float) $candle[1],
-                'close' => (float) $candle[2],
-                'high' => (float) $candle[3],
-                'low' => (float) $candle[4],
-                'volume' => (float) $candle[5],
-                'amount' => (float) $candle[6]
-            ];
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->getKuCoinPrice($symbol);
+                case 'binance':
+                    return $this->getBinancePrice($symbol);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error fetching price for {$symbol}: " . $e->getMessage());
+            return null;
         }
-        
-        return array_reverse($candles); // Reverse to get chronological order
-    }
-
-    private function formatBinanceCandles(array $data): array
-    {
-        $candles = [];
-        
-        foreach ($data as $candle) {
-            $candles[] = [
-                'time' => $candle[0],
-                'open' => (float) $candle[1],
-                'high' => (float) $candle[2],
-                'low' => (float) $candle[3],
-                'close' => (float) $candle[4],
-                'volume' => (float) $candle[5],
-                'close_time' => $candle[6],
-                'quote_volume' => (float) $candle[7],
-                'trades' => (int) $candle[8],
-                'taker_buy_base' => (float) $candle[9],
-                'taker_buy_quote' => (float) $candle[10]
-            ];
-        }
-        
-        return $candles;
     }
 
     /**
-     * Get current price
+     * Place a buy order
      */
-    public function getCurrentPrice(string $symbol): ?float
+    public function placeBuyOrder($symbol, $quantity, $price = null)
     {
-        $endpoint = $this->getPriceEndpoint($symbol);
-        
-        Log::info("💰 [PRICE] Fetching current price from {$this->exchange} for {$symbol}");
-        Log::info("🔗 [PRICE] Endpoint: {$endpoint}");
-        
         try {
-            $response = Http::get($endpoint);
-            
-            if ($response->successful()) {
-                $price = $this->extractPrice($response->json());
-                Log::info("✅ [PRICE] Current price for {$symbol}: $price");
-                return $price;
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->placeKuCoinBuyOrder($symbol, $quantity, $price);
+                case 'binance':
+                    return $this->placeBinanceBuyOrder($symbol, $quantity, $price);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
             }
-            
-            Log::error("❌ [PRICE] Failed to get price from {$this->exchange}", [
-                'symbol' => $symbol,
-                'response' => $response->body()
-            ]);
-            
-            return null;
         } catch (\Exception $e) {
-            Log::error("❌ [PRICE] Exception getting price from {$this->exchange}", [
-                'symbol' => $symbol,
-                'error' => $e->getMessage()
-            ]);
-            
-            return null;
+            Log::error("Error placing buy order: " . $e->getMessage());
+            throw $e;
         }
-    }
-
-    private function getPriceEndpoint(string $symbol): string
-    {
-        return match($this->exchange) {
-            'kucoin' => "{$this->baseUrl}/api/v1/market/orderbook/level1?symbol={$symbol}",
-            'binance' => "{$this->baseUrl}/api/v3/ticker/price?symbol={$symbol}",
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
-    }
-
-    private function extractPrice(array $data): float
-    {
-        return match($this->exchange) {
-            'kucoin' => (float) $data['data']['price'],
-            'binance' => (float) $data['price'],
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
     }
 
     /**
-     * Place a market order
+     * Place a sell order
      */
-    public function placeMarketOrder(string $symbol, string $side, float $quantity): ?array
+    public function placeSellOrder($symbol, $quantity, $price = null)
     {
-        $endpoint = $this->getOrderEndpoint();
-        $params = $this->buildOrderParams($symbol, $side, $quantity);
-        
         try {
-            $response = Http::withHeaders($this->getAuthHeaders($params))
-                ->post($endpoint, $params);
-            
-            if ($response->successful()) {
-                return $this->formatOrderResponse($response->json());
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->placeKuCoinSellOrder($symbol, $quantity, $price);
+                case 'binance':
+                    return $this->placeBinanceSellOrder($symbol, $quantity, $price);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
             }
-            
-            Log::error("Failed to place order on {$this->exchange}", [
-                'symbol' => $symbol,
-                'side' => $side,
-                'quantity' => $quantity,
-                'response' => $response->body()
-            ]);
-            
-            return null;
         } catch (\Exception $e) {
-            Log::error("Exception placing order on {$this->exchange}", [
-                'symbol' => $symbol,
-                'side' => $side,
-                'quantity' => $quantity,
-                'error' => $e->getMessage()
-            ]);
-            
-            return null;
+            Log::error("Error placing sell order: " . $e->getMessage());
+            throw $e;
         }
-    }
-
-    private function getOrderEndpoint(): string
-    {
-        return match($this->exchange) {
-            'kucoin' => "{$this->baseUrl}/api/v1/orders",
-            'binance' => "{$this->baseUrl}/api/v3/order",
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
-    }
-
-    private function buildOrderParams(string $symbol, string $side, float $quantity): array
-    {
-        return match($this->exchange) {
-            'kucoin' => [
-                'clientOid' => uniqid(),
-                'symbol' => $symbol,
-                'side' => $side,
-                'type' => 'market',
-                'size' => $quantity
-            ],
-            'binance' => [
-                'symbol' => $symbol,
-                'side' => strtoupper($side),
-                'type' => 'MARKET',
-                'quantity' => $quantity,
-                'timestamp' => round(microtime(true) * 1000)
-            ],
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
-    }
-
-    private function getAuthHeaders(array $params): array
-    {
-        return match($this->exchange) {
-            'kucoin' => $this->getKucoinAuthHeaders($params),
-            'binance' => $this->getBinanceAuthHeaders($params),
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
-    }
-
-    private function getKucoinAuthHeaders(array $params): array
-    {
-        $timestamp = time() * 1000;
-        $signature = $this->generateKucoinSignature($timestamp, $params);
-        
-        return [
-            'KC-API-KEY' => $this->apiKey,
-            'KC-API-SIGN' => $signature,
-            'KC-API-TIMESTAMP' => $timestamp,
-            'KC-API-PASSPHRASE' => $this->passphrase,
-            'KC-API-KEY-VERSION' => '2'
-        ];
-    }
-
-    private function getBinanceAuthHeaders(array $params): array
-    {
-        $signature = $this->generateBinanceSignature($params);
-        $params['signature'] = $signature;
-        
-        return [
-            'X-MBX-APIKEY' => $this->apiKey
-        ];
-    }
-
-    private function generateKucoinSignature(int $timestamp, array $params): string
-    {
-        $str = $timestamp . 'POST' . '/api/v1/orders' . json_encode($params);
-        return base64_encode(hash_hmac('sha256', $str, $this->apiSecret, true));
-    }
-
-    private function generateBinanceSignature(array $params): string
-    {
-        $queryString = http_build_query($params);
-        return hash_hmac('sha256', $queryString, $this->apiSecret);
-    }
-
-    private function formatOrderResponse(array $data): array
-    {
-        return match($this->exchange) {
-            'kucoin' => [
-                'order_id' => $data['data']['orderId'],
-                'symbol' => $data['data']['symbol'],
-                'side' => $data['data']['side'],
-                'quantity' => $data['data']['size'],
-                'price' => $data['data']['price'],
-                'status' => $data['data']['status']
-            ],
-            'binance' => [
-                'order_id' => $data['orderId'],
-                'symbol' => $data['symbol'],
-                'side' => $data['side'],
-                'quantity' => $data['origQty'],
-                'price' => $data['price'],
-                'status' => $data['status']
-            ],
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
     }
 
     /**
      * Get account balance
      */
-    public function getBalance(string $currency = null): array
+    public function getAccountBalance()
     {
-        $endpoint = $this->getBalanceEndpoint();
-        
         try {
-            $response = Http::withHeaders($this->getAuthHeaders([]))
-                ->get($endpoint);
-            
-            if ($response->successful()) {
-                return $this->formatBalance($response->json(), $currency);
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->getKuCoinBalance();
+                case 'binance':
+                    return $this->getBinanceBalance();
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
             }
-            
-            Log::error("Failed to get balance from {$this->exchange}", [
-                'currency' => $currency,
-                'response' => $response->body()
-            ]);
-            
-            return [];
         } catch (\Exception $e) {
-            Log::error("Exception getting balance from {$this->exchange}", [
-                'currency' => $currency,
-                'error' => $e->getMessage()
-            ]);
-            
+            Log::error("Error fetching account balance: " . $e->getMessage());
             return [];
         }
     }
 
-    private function getBalanceEndpoint(): string
+    /**
+     * Get balance (alias for getAccountBalance)
+     */
+    public function getBalance()
     {
-        return match($this->exchange) {
-            'kucoin' => "{$this->baseUrl}/api/v1/accounts",
-            'binance' => "{$this->baseUrl}/api/v3/account",
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
+        return $this->getAccountBalance();
     }
 
-    private function formatBalance(array $data, ?string $currency): array
+    /**
+     * Place market order (buy or sell)
+     */
+    public function placeMarketOrder($symbol, $side, $quantity): ?array
     {
-        return match($this->exchange) {
-            'kucoin' => $this->formatKucoinBalance($data, $currency),
-            'binance' => $this->formatBinanceBalance($data, $currency),
-            default => throw new \InvalidArgumentException('Unsupported exchange')
-        };
+        try {
+            switch ($side) {
+                case 'buy':
+                    return $this->placeBuyOrder($symbol, $quantity);
+                case 'sell':
+                    return $this->placeSellOrder($symbol, $quantity);
+                default:
+                    throw new \Exception("Invalid order side: {$side}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error placing market order: " . $e->getMessage());
+            return null;
+        }
     }
 
-    private function formatKucoinBalance(array $data, ?string $currency): array
+    /**
+     * Get candlestick data for a symbol
+     */
+    public function getCandles($symbol, $interval = '1h', $limit = 500)
     {
-        $balances = [];
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->getKuCoinCandles($symbol, $interval, $limit);
+                case 'binance':
+                    return $this->getBinanceCandles($symbol, $interval, $limit);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error fetching candles for {$symbol}: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * KuCoin API Methods
+     */
+    private function getKuCoinTradingPairs()
+    {
+        $response = Http::get('https://api.kucoin.com/api/v1/symbols');
         
-        foreach ($data['data'] as $account) {
-            if ($currency && $account['currency'] !== $currency) {
-                continue;
+        if ($response->successful()) {
+            $data = $response->json();
+            $pairs = [];
+            
+            foreach ($data['data'] as $symbol) {
+                if ($symbol['enableTrading']) {
+                    $pairs[] = [
+                        'symbol' => $symbol['symbol'],
+                        'baseCurrency' => $symbol['baseCurrency'],
+                        'quoteCurrency' => $symbol['quoteCurrency'],
+                        'name' => $symbol['baseCurrency'],
+                        'type' => 'crypto'
+                    ];
+                }
             }
             
-            if ((float) $account['balance'] > 0) {
-                $balances[] = [
-                    'currency' => $account['currency'],
-                    'balance' => (float) $account['balance'],
-                    'available' => (float) $account['available'],
-                    'holds' => (float) $account['holds']
-                ];
+            return $pairs;
+        }
+        
+        return [];
+    }
+
+    private function getKuCoinPrice($symbol)
+    {
+        $response = Http::get("https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={$symbol}");
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            return (float) $data['data']['price'];
+        }
+        
+        return null;
+    }
+
+    private function placeKuCoinBuyOrder($symbol, $quantity, $price = null)
+    {
+        $timestamp = time() * 1000;
+        $endpoint = '/api/v1/orders';
+        
+        $params = [
+            'clientOid' => uniqid(),
+            'symbol' => $symbol,
+            'side' => 'buy',
+            'type' => $price ? 'limit' : 'market',
+            'size' => $quantity
+        ];
+        
+        if ($price) {
+            $params['price'] = $price;
+        }
+        
+        $signature = $this->generateKuCoinSignature('POST', $endpoint, $params, $timestamp);
+        
+        $response = Http::withHeaders([
+            'KC-API-KEY' => $this->apiKey,
+            'KC-API-SIGN' => $signature,
+            'KC-API-TIMESTAMP' => $timestamp,
+            'KC-API-PASSPHRASE' => $this->passphrase,
+            'KC-API-KEY-VERSION' => '2'
+        ])->post('https://api.kucoin.com' . $endpoint, $params);
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            return [
+                'order_id' => $data['data']['orderId'],
+                'side' => 'buy',
+                'symbol' => $symbol,
+                'quantity' => $quantity
+            ];
+        }
+        
+        throw new \Exception("KuCoin buy order failed: " . $response->body());
+    }
+
+    private function placeKuCoinSellOrder($symbol, $quantity, $price = null)
+    {
+        $timestamp = time() * 1000;
+        $endpoint = '/api/v1/orders';
+        
+        $params = [
+            'clientOid' => uniqid(),
+            'symbol' => $symbol,
+            'side' => 'sell',
+            'type' => $price ? 'limit' : 'market',
+            'size' => $quantity
+        ];
+        
+        if ($price) {
+            $params['price'] = $price;
+        }
+        
+        $signature = $this->generateKuCoinSignature('POST', $endpoint, $params, $timestamp);
+        
+        $response = Http::withHeaders([
+            'KC-API-KEY' => $this->apiKey,
+            'KC-API-SIGN' => $signature,
+            'KC-API-TIMESTAMP' => $timestamp,
+            'KC-API-PASSPHRASE' => $this->passphrase,
+            'KC-API-KEY-VERSION' => '2'
+        ])->post('https://api.kucoin.com' . $endpoint, $params);
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            return [
+                'order_id' => $data['data']['orderId'],
+                'side' => 'sell',
+                'symbol' => $symbol,
+                'quantity' => $quantity
+            ];
+        }
+        
+        throw new \Exception("KuCoin sell order failed: " . $response->body());
+    }
+
+    private function getKuCoinBalance()
+    {
+        $timestamp = time() * 1000;
+        $endpoint = '/api/v1/accounts';
+        
+        $signature = $this->generateKuCoinSignature('GET', $endpoint, '', $timestamp);
+        
+        $response = Http::withHeaders([
+            'KC-API-KEY' => $this->apiKey,
+            'KC-API-SIGN' => $signature,
+            'KC-API-TIMESTAMP' => $timestamp,
+            'KC-API-PASSPHRASE' => $this->passphrase,
+            'KC-API-KEY-VERSION' => '2'
+        ])->get('https://api.kucoin.com' . $endpoint);
+        
+        if ($response->successful()) {
+            return $response->json()['data'];
+        }
+        
+        return [];
+    }
+
+    private function generateKuCoinSignature($method, $endpoint, $params, $timestamp)
+    {
+        $str = $timestamp . $method . $endpoint;
+        
+        if (!empty($params)) {
+            if (is_array($params)) {
+                $str .= json_encode($params);
+            } else {
+                $str .= $params;
             }
         }
         
-        return $balances;
+        return base64_encode(hash_hmac('sha256', $str, $this->secretKey, true));
     }
 
-    private function formatBinanceBalance(array $data, ?string $currency): array
+    /**
+     * Binance API Methods
+     */
+    private function getBinanceTradingPairs()
     {
-        $balances = [];
+        $response = Http::get('https://api.binance.com/api/v3/exchangeInfo');
         
-        foreach ($data['balances'] as $balance) {
-            if ($currency && $balance['asset'] !== $currency) {
-                continue;
+        if ($response->successful()) {
+            $data = $response->json();
+            $pairs = [];
+            
+            foreach ($data['symbols'] as $symbol) {
+                if ($symbol['status'] === 'TRADING') {
+                    $pairs[] = [
+                        'symbol' => $symbol['symbol'],
+                        'baseCurrency' => $symbol['baseAsset'],
+                        'quoteCurrency' => $symbol['quoteAsset'],
+                        'name' => $symbol['baseAsset'],
+                        'type' => 'crypto'
+                    ];
+                }
             }
             
-            if ((float) $balance['free'] > 0 || (float) $balance['locked'] > 0) {
-                $balances[] = [
-                    'currency' => $balance['asset'],
-                    'balance' => (float) $balance['free'] + (float) $balance['locked'],
-                    'available' => (float) $balance['free'],
-                    'holds' => (float) $balance['locked']
+            return $pairs;
+        }
+        
+        return [];
+    }
+
+    private function getBinancePrice($symbol)
+    {
+        $response = Http::get("https://api.binance.com/api/v3/ticker/price?symbol={$symbol}");
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            return (float) $data['price'];
+        }
+        
+        return null;
+    }
+
+    private function placeBinanceBuyOrder($symbol, $quantity, $price = null)
+    {
+        $timestamp = round(microtime(true) * 1000);
+        $endpoint = '/api/v3/order';
+        
+        $params = [
+            'symbol' => $symbol,
+            'side' => 'BUY',
+            'type' => $price ? 'LIMIT' : 'MARKET',
+            'quantity' => $quantity,
+            'timestamp' => $timestamp
+        ];
+        
+        if ($price) {
+            $params['price'] = $price;
+            $params['timeInForce'] = 'GTC';
+        }
+        
+        $queryString = http_build_query($params);
+        $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+        $params['signature'] = $signature;
+        
+        $response = Http::withHeaders([
+            'X-MBX-APIKEY' => $this->apiKey
+        ])->post('https://api.binance.com' . $endpoint, $params);
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            return [
+                'order_id' => $data['orderId'],
+                'side' => 'buy',
+                'symbol' => $symbol,
+                'quantity' => $quantity
+            ];
+        }
+        
+        throw new \Exception("Binance buy order failed: " . $response->body());
+    }
+
+    private function placeBinanceSellOrder($symbol, $quantity, $price = null)
+    {
+        $timestamp = round(microtime(true) * 1000);
+        $endpoint = '/api/v3/order';
+        
+        $params = [
+            'symbol' => $symbol,
+            'side' => 'SELL',
+            'type' => $price ? 'LIMIT' : 'MARKET',
+            'quantity' => $quantity,
+            'timestamp' => $timestamp
+        ];
+        
+        if ($price) {
+            $params['price'] = $price;
+            $params['timeInForce'] = 'GTC';
+        }
+        
+        $queryString = http_build_query($params);
+        $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+        $params['signature'] = $signature;
+        
+        $response = Http::withHeaders([
+            'X-MBX-APIKEY' => $this->apiKey
+        ])->post('https://api.binance.com' . $endpoint, $params);
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            return [
+                'order_id' => $data['orderId'],
+                'side' => 'sell',
+                'symbol' => $symbol,
+                'quantity' => $quantity
+            ];
+        }
+        
+        throw new \Exception("Binance sell order failed: " . $response->body());
+    }
+
+    private function getBinanceBalance()
+    {
+        $timestamp = round(microtime(true) * 1000);
+        $endpoint = '/api/v3/account';
+        
+        $params = [
+            'timestamp' => $timestamp
+        ];
+        
+        $queryString = http_build_query($params);
+        $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+        $params['signature'] = $signature;
+        
+        $response = Http::withHeaders([
+            'X-MBX-APIKEY' => $this->apiKey
+        ])->get('https://api.binance.com' . $endpoint, $params);
+        
+        if ($response->successful()) {
+            return $response->json()['balances'];
+        }
+        
+        return [];
+    }
+
+    /**
+     * KuCoin candlestick data
+     */
+    private function getKuCoinCandles($symbol, $interval = '1h', $limit = 500)
+    {
+        $response = Http::get("https://api.kucoin.com/api/v1/market/candles", [
+            'symbol' => $symbol,
+            'type' => $interval,
+            'limit' => $limit
+        ]);
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            $candles = [];
+            
+            if (isset($data['data']) && is_array($data['data'])) {
+                foreach ($data['data'] as $candle) {
+                    if (is_array($candle) && count($candle) >= 6) {
+                        $candles[] = [
+                            'timestamp' => $candle[0],
+                            'open' => (float) $candle[1],
+                            'close' => (float) $candle[2],
+                            'high' => (float) $candle[3],
+                            'low' => (float) $candle[4],
+                            'volume' => (float) $candle[5]
+                        ];
+                    }
+                }
+            }
+            
+            return array_reverse($candles); // Return in chronological order
+        }
+        
+        return [];
+    }
+
+    /**
+     * Binance candlestick data
+     */
+    private function getBinanceCandles($symbol, $interval = '1h', $limit = 500)
+    {
+        $response = Http::get("https://api.binance.com/api/v3/klines", [
+            'symbol' => $symbol,
+            'interval' => $interval,
+            'limit' => $limit
+        ]);
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            $candles = [];
+            
+            foreach ($data as $candle) {
+                $candles[] = [
+                    'timestamp' => $candle[0],
+                    'open' => (float) $candle[1],
+                    'high' => (float) $candle[2],
+                    'low' => (float) $candle[3],
+                    'close' => (float) $candle[4],
+                    'volume' => (float) $candle[5]
                 ];
+            }
+            
+            return $candles;
+        }
+        
+        return [];
+    }
+
+    /**
+     * Sync assets from exchange to database
+     */
+    public function syncAssets()
+    {
+        $tradingPairs = $this->getTradingPairs();
+        $syncedCount = 0;
+        
+        foreach ($tradingPairs as $pair) {
+            $asset = Asset::updateOrCreate(
+                ['symbol' => $pair['symbol']],
+                [
+                    'name' => $pair['name'],
+                    'type' => $pair['type'],
+                    'current_price' => $this->getCurrentPrice($pair['symbol']) ?? 0,
+                    'is_active' => true
+                ]
+            );
+            
+            if ($asset->wasRecentlyCreated || $asset->wasChanged()) {
+                $syncedCount++;
             }
         }
         
-        return $balances;
+        return $syncedCount;
+    }
+
+    /**
+     * Update prices for all assets
+     */
+    public function updatePrices()
+    {
+        $assets = Asset::active()->get();
+        $updatedCount = 0;
+        
+        foreach ($assets as $asset) {
+            $price = $this->getCurrentPrice($asset->symbol);
+            if ($price !== null && $price != $asset->current_price) {
+                $asset->update(['current_price' => $price]);
+                $updatedCount++;
+            }
+        }
+        
+        return $updatedCount;
     }
 }

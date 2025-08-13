@@ -56,4 +56,26 @@ class User extends Authenticatable
     {
         return $this->hasMany(TradingBot::class);
     }
+
+    public function assetTransactions()
+    {
+        return $this->hasMany(AssetTransaction::class);
+    }
+
+    public function assetHoldings()
+    {
+        return $this->hasMany(UserAssetHolding::class);
+    }
+
+    public function getPortfolioValueAttribute()
+    {
+        return $this->assetHoldings->sum(function ($holding) {
+            return $holding->current_value;
+        });
+    }
+
+    public function getFormattedPortfolioValueAttribute()
+    {
+        return '$' . number_format($this->portfolio_value, 2);
+    }
 }
