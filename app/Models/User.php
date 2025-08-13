@@ -57,6 +57,11 @@ class User extends Authenticatable
         return $this->hasMany(TradingBot::class);
     }
 
+    public function futuresTradingBots()
+    {
+        return $this->hasMany(FuturesTradingBot::class);
+    }
+
     public function assetTransactions()
     {
         return $this->hasMany(AssetTransaction::class);

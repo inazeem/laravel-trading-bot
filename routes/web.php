@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\RoleController;
 use App\Http\Controllers\Admin\PermissionController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\TradingBotController;
+use App\Http\Controllers\FuturesTradingBotController;
 use App\Http\Controllers\ApiKeyController;
 use App\Http\Controllers\AssetController;
 
@@ -50,9 +51,17 @@ Route::middleware(['auth'])->group(function () {
     Route::resource('trading-bots', TradingBotController::class);
     Route::post('trading-bots/{tradingBot}/run', [TradingBotController::class, 'run'])->name('trading-bots.run');
     Route::post('trading-bots/{tradingBot}/toggle-status', [TradingBotController::class, 'toggleStatus'])->name('trading-bots.toggle-status');
-Route::get('trading-bots/{tradingBot}/trades', [TradingBotController::class, 'trades'])->name('trading-bots.trades');
-Route::get('trading-bots/{tradingBot}/signals', [TradingBotController::class, 'signals'])->name('trading-bots.signals');
-Route::get('trading-bots/{tradingBot}/logs', [TradingBotController::class, 'logs'])->name('trading-bots.logs');
+    Route::get('trading-bots/{tradingBot}/trades', [TradingBotController::class, 'trades'])->name('trading-bots.trades');
+    Route::get('trading-bots/{tradingBot}/signals', [TradingBotController::class, 'signals'])->name('trading-bots.signals');
+    Route::get('trading-bots/{tradingBot}/logs', [TradingBotController::class, 'logs'])->name('trading-bots.logs');
+    
+    // Futures Trading Bot routes
+    Route::resource('futures-bots', FuturesTradingBotController::class);
+    Route::post('futures-bots/{futuresBot}/run', [FuturesTradingBotController::class, 'run'])->name('futures-bots.run');
+    Route::post('futures-bots/{futuresBot}/toggle', [FuturesTradingBotController::class, 'toggle'])->name('futures-bots.toggle');
+    Route::get('futures-bots/{futuresBot}/trades', [FuturesTradingBotController::class, 'trades'])->name('futures-bots.trades');
+    Route::get('futures-bots/{futuresBot}/signals', [FuturesTradingBotController::class, 'signals'])->name('futures-bots.signals');
+    Route::post('futures-bots/{futuresBot}/close-position', [FuturesTradingBotController::class, 'closePosition'])->name('futures-bots.close-position');
     
     // API Key routes
     Route::resource('api-keys', ApiKeyController::class);
