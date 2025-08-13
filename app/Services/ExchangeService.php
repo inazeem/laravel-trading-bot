@@ -133,6 +133,66 @@ class ExchangeService
     }
 
     /**
+     * Get futures account balance
+     */
+    public function getFuturesBalance()
+    {
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->getKuCoinFuturesBalance();
+                case 'binance':
+                    return $this->getBinanceFuturesBalance();
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error fetching futures balance: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Place futures order
+     */
+    public function placeFuturesOrder($symbol, $side, $quantity, $leverage, $marginType)
+    {
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->placeKuCoinFuturesOrder($symbol, $side, $quantity, $leverage, $marginType);
+                case 'binance':
+                    return $this->placeBinanceFuturesOrder($symbol, $side, $quantity, $leverage, $marginType);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error placing futures order: " . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Close futures position
+     */
+    public function closeFuturesPosition($symbol, $side, $quantity, $orderId = null)
+    {
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->closeKuCoinFuturesPosition($symbol, $side, $quantity, $orderId);
+                case 'binance':
+                    return $this->closeBinanceFuturesPosition($symbol, $side, $quantity, $orderId);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error closing futures position: " . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
      * Place market order (buy or sell)
      */
     public function placeMarketOrder($symbol, $side, $quantity): ?array

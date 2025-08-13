@@ -16,7 +16,10 @@
                         {{ __('Dashboard') }}
                     </x-nav-link>
                     <x-nav-link :href="route('trading-bots.index')" :active="request()->routeIs('trading-bots.*')">
-                        {{ __('Trading Bots') }}
+                        {{ __('Spot Bots') }}
+                    </x-nav-link>
+                    <x-nav-link :href="route('futures-bots.index')" :active="request()->routeIs('futures-bots.*')">
+                        {{ __('Futures Bots') }}
                     </x-nav-link>
                     <x-nav-link :href="route('api-keys.index')" :active="request()->routeIs('api-keys.*')">
                         {{ __('API Keys') }}
@@ -63,7 +66,13 @@
                             <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                             </svg>
-                            {{ __('Trading Bots') }}
+                            {{ __('Spot Bots') }}
+                        </x-dropdown-link>
+                        <x-dropdown-link :href="route('futures-bots.index')">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                            </svg>
+                            {{ __('Futures Bots') }}
                         </x-dropdown-link>
                         <x-dropdown-link :href="route('api-keys.index')">
                             <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
