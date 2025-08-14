@@ -199,6 +199,12 @@
                             <a href="{{ route('trading-bots.logs', $tradingBot) }}" class="text-blue-600 hover:text-blue-900 text-sm">
                                 View Logs
                             </a>
+                            <form method="POST" action="{{ route('trading-bots.clear-logs', $tradingBot) }}" class="inline" onsubmit="return confirm('Are you sure you want to clear all logs for this trading bot? This action cannot be undone.')">
+                                @csrf
+                                <button type="submit" class="text-red-600 hover:text-red-900 text-sm">
+                                    Clear Logs
+                                </button>
+                            </form>
                         </div>
                     </div>
                     @if($tradingBot->trades->count() > 0)

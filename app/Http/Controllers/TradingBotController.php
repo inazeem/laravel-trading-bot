@@ -211,6 +211,23 @@ class TradingBotController extends Controller
         return view('trading-bots.logs', compact('tradingBot', 'logs', 'summary'));
     }
 
+    public function clearLogs(TradingBot $tradingBot)
+    {
+        // Ensure user can only clear their own bot logs
+        if ($tradingBot->user_id !== auth()->id()) {
+            abort(403);
+        }
+        
+        try {
+            $tradingBot->logs()->delete();
+            
+            return back()->with('success', 'All logs for this trading bot have been cleared successfully.');
+        } catch (\Exception $e) {
+            Log::error('Error clearing trading bot logs: ' . $e->getMessage());
+            return back()->with('error', 'Failed to clear logs.');
+        }
+    }
+
     private function calculateWinRate(TradingBot $tradingBot): float
     {
         $closedTrades = $tradingBot->trades()->where('status', 'closed')->get();

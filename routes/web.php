@@ -54,6 +54,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('trading-bots/{tradingBot}/trades', [TradingBotController::class, 'trades'])->name('trading-bots.trades');
     Route::get('trading-bots/{tradingBot}/signals', [TradingBotController::class, 'signals'])->name('trading-bots.signals');
     Route::get('trading-bots/{tradingBot}/logs', [TradingBotController::class, 'logs'])->name('trading-bots.logs');
+    Route::post('trading-bots/{tradingBot}/clear-logs', [TradingBotController::class, 'clearLogs'])->name('trading-bots.clear-logs');
     
     // Futures Trading Bot routes
     Route::resource('futures-bots', FuturesTradingBotController::class);

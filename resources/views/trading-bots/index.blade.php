@@ -80,6 +80,7 @@
                                                 <div class="flex space-x-2">
                                                     <a href="{{ route('trading-bots.show', $bot) }}" class="text-blue-600 hover:text-blue-900">View</a>
                                                     <a href="{{ route('trading-bots.edit', $bot) }}" class="text-indigo-600 hover:text-indigo-900">Edit</a>
+                                                    <a href="{{ route('trading-bots.logs', $bot) }}" class="text-green-600 hover:text-green-900">Logs</a>
                                                     
                                                     @if($bot->is_active)
                                                         <form method="POST" action="{{ route('trading-bots.run', $bot) }}" class="inline">

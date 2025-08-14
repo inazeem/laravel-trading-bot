@@ -5,6 +5,15 @@
                 {{ $tradingBot->name }} - Execution Logs
             </h2>
             <div class="flex space-x-3">
+                <form method="POST" action="{{ route('trading-bots.clear-logs', $tradingBot) }}" class="inline" onsubmit="return confirm('Are you sure you want to clear all logs for this trading bot? This action cannot be undone.')">
+                    @csrf
+                    <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-200 ease-in-out">
+                        <svg class="w-4 h-4 inline mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                        Clear Logs
+                    </button>
+                </form>
                 <a href="{{ route('trading-bots.show', $tradingBot) }}" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">
                     Back to Bot
                 </a>
