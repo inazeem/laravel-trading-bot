@@ -143,15 +143,29 @@
                             </div>
                         </div>
 
-                        <div class="mt-8 flex justify-end space-x-4">
-                            <a href="{{ route('trading-bots.index') }}" 
-                               class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded">
-                                Cancel
-                            </a>
-                            <button type="submit" 
-                                    class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
-                                Update Trading Bot
-                            </button>
+                        <div class="mt-8 flex justify-between items-center">
+                            <!-- Delete Button -->
+                            <form method="POST" action="{{ route('trading-bots.destroy', $tradingBot) }}" 
+                                onsubmit="return confirm('Are you sure you want to delete this trading bot? This action cannot be undone and will delete all associated trades, signals, and logs.')">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" 
+                                        class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                                    <i class="fas fa-trash mr-2"></i>Delete Bot
+                                </button>
+                            </form>
+                            
+                            <!-- Update/Cancel Buttons -->
+                            <div class="flex space-x-4">
+                                <a href="{{ route('trading-bots.index') }}" 
+                                   class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded">
+                                    Cancel
+                                </a>
+                                <button type="submit" 
+                                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                                    Update Trading Bot
+                                </button>
+                            </div>
                         </div>
                     </form>
                 </div>

@@ -62,6 +62,8 @@ Route::middleware(['auth'])->group(function () {
     Route::post('futures-bots/{futuresBot}/toggle', [FuturesTradingBotController::class, 'toggle'])->name('futures-bots.toggle');
     Route::get('futures-bots/{futuresBot}/trades', [FuturesTradingBotController::class, 'trades'])->name('futures-bots.trades');
     Route::get('futures-bots/{futuresBot}/signals', [FuturesTradingBotController::class, 'signals'])->name('futures-bots.signals');
+    Route::get('futures-bots/{futuresBot}/logs', [FuturesTradingBotController::class, 'logs'])->name('futures-bots.logs');
+    Route::post('futures-bots/{futuresBot}/clear-logs', [FuturesTradingBotController::class, 'clearLogs'])->name('futures-bots.clear-logs');
     Route::post('futures-bots/{futuresBot}/close-position', [FuturesTradingBotController::class, 'closePosition'])->name('futures-bots.close-position');
     
     // API Key routes

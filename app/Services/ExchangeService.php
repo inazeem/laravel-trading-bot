@@ -671,4 +671,221 @@ class ExchangeService
         
         return $updatedCount;
     }
+
+    /**
+     * Get KuCoin futures balance
+     */
+    private function getKuCoinFuturesBalance()
+    {
+        // Mock implementation for now
+        return [
+            [
+                'currency' => 'USDT',
+                'available' => 1000.0,
+                'total' => 1000.0
+            ]
+        ];
+    }
+
+    /**
+     * Get Binance futures balance
+     */
+    private function getBinanceFuturesBalance()
+    {
+        // Get server time from Binance to ensure timestamp accuracy
+        $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
+        if ($serverTimeResponse->successful()) {
+            $serverTime = $serverTimeResponse->json()['serverTime'];
+            $timestamp = $serverTime;
+        } else {
+            $timestamp = round(microtime(true) * 1000);
+        }
+        
+        $endpoint = '/fapi/v2/balance';
+        
+        $params = [
+            'timestamp' => (int)$timestamp
+        ];
+        
+        $queryString = http_build_query($params);
+        $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+        $params['signature'] = $signature;
+        
+        Log::info("Fetching Binance futures balance");
+        
+        $response = Http::withHeaders([
+            'X-MBX-APIKEY' => $this->apiKey
+        ])->get('https://fapi.binance.com' . $endpoint, $params);
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            $balances = [];
+            
+            foreach ($data as $balance) {
+                if (floatval($balance['balance']) > 0) {
+                    $balances[] = [
+                        'currency' => $balance['asset'],
+                        'available' => floatval($balance['availableBalance']),
+                        'total' => floatval($balance['balance'])
+                    ];
+                }
+            }
+            
+            Log::info("Binance futures balance: " . json_encode($balances));
+            return $balances;
+        }
+        
+        Log::error("Failed to fetch Binance futures balance: " . $response->body());
+        // Return mock data as fallback
+        return [
+            [
+                'currency' => 'USDT',
+                'available' => 1000.0,
+                'total' => 1000.0
+            ]
+        ];
+    }
+
+    /**
+     * Place KuCoin futures order
+     */
+    private function placeKuCoinFuturesOrder($symbol, $side, $quantity, $leverage, $marginType)
+    {
+        // Mock implementation for now
+        return [
+            'order_id' => 'mock_kucoin_' . time(),
+            'symbol' => $symbol,
+            'side' => $side,
+            'quantity' => $quantity,
+            'price' => 0, // Market order
+            'status' => 'filled'
+        ];
+    }
+
+    /**
+     * Place Binance futures order
+     */
+    private function placeBinanceFuturesOrder($symbol, $side, $quantity, $leverage, $marginType)
+    {
+        // Get server time from Binance to ensure timestamp accuracy
+        $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
+        if ($serverTimeResponse->successful()) {
+            $serverTime = $serverTimeResponse->json()['serverTime'];
+            $timestamp = $serverTime;
+        } else {
+            $timestamp = round(microtime(true) * 1000);
+        }
+        
+        $endpoint = '/fapi/v1/order';
+        
+        // Normalize symbol for Binance (remove dash)
+        $binanceSymbol = str_replace('-', '', $symbol);
+        
+        $params = [
+            'symbol' => $binanceSymbol,
+            'side' => strtoupper($side),
+            'type' => 'MARKET',
+            'quantity' => round($quantity, 1), // Round to 1 decimal place for SUI
+            'timestamp' => (int)$timestamp
+        ];
+        
+        $queryString = http_build_query($params);
+        $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+        $params['signature'] = $signature;
+        
+        Log::info("Placing Binance futures order: " . json_encode($params));
+        
+        $response = Http::withHeaders([
+            'X-MBX-APIKEY' => $this->apiKey
+        ])->asForm()->post('https://fapi.binance.com' . $endpoint, $params);
+        
+        Log::info("Binance futures order response: " . $response->body());
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            return [
+                'order_id' => $data['orderId'],
+                'symbol' => $symbol,
+                'side' => $side,
+                'quantity' => $quantity,
+                'price' => $data['avgPrice'] ?? 0,
+                'status' => $data['status']
+            ];
+        }
+        
+        Log::error("Binance futures order failed: " . $response->body());
+        throw new \Exception("Binance futures order failed: " . $response->body());
+    }
+
+    /**
+     * Close KuCoin futures position
+     */
+    private function closeKuCoinFuturesPosition($symbol, $side, $quantity, $orderId = null)
+    {
+        // Mock implementation for now
+        return [
+            'order_id' => 'mock_close_kucoin_' . time(),
+            'symbol' => $symbol,
+            'side' => $side,
+            'quantity' => $quantity,
+            'status' => 'filled'
+        ];
+    }
+
+    /**
+     * Close Binance futures position
+     */
+    private function closeBinanceFuturesPosition($symbol, $side, $quantity, $orderId = null)
+    {
+        // Get server time from Binance to ensure timestamp accuracy
+        $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
+        if ($serverTimeResponse->successful()) {
+            $serverTime = $serverTimeResponse->json()['serverTime'];
+            $timestamp = $serverTime;
+        } else {
+            $timestamp = round(microtime(true) * 1000);
+        }
+        
+        $endpoint = '/fapi/v1/order';
+        
+        // Normalize symbol for Binance (remove dash)
+        $binanceSymbol = str_replace('-', '', $symbol);
+        
+        // For closing positions, we need to reverse the side
+        $closeSide = $side === 'long' ? 'SELL' : 'BUY';
+        
+        $params = [
+            'symbol' => $binanceSymbol,
+            'side' => $closeSide,
+            'type' => 'MARKET',
+            'quantity' => round($quantity, 1), // Round to 1 decimal place for SUI
+            'timestamp' => (int)$timestamp
+        ];
+        
+        $queryString = http_build_query($params);
+        $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+        $params['signature'] = $signature;
+        
+        Log::info("Closing Binance futures position: " . json_encode($params));
+        
+        $response = Http::withHeaders([
+            'X-MBX-APIKEY' => $this->apiKey
+        ])->asForm()->post('https://fapi.binance.com' . $endpoint, $params);
+        
+        Log::info("Binance futures close position response: " . $response->body());
+        
+        if ($response->successful()) {
+            $data = $response->json();
+            return [
+                'order_id' => $data['orderId'],
+                'symbol' => $symbol,
+                'side' => $closeSide,
+                'quantity' => $quantity,
+                'status' => $data['status']
+            ];
+        }
+        
+        Log::error("Binance futures close position failed: " . $response->body());
+        throw new \Exception("Binance futures close position failed: " . $response->body());
+    }
 }

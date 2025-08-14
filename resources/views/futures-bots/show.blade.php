@@ -16,6 +16,14 @@
                         </button>
                     </form>
                 @endif
+                <form method="POST" action="{{ route('futures-bots.destroy', $futuresBot) }}" class="inline" 
+                    onsubmit="return confirm('Are you sure you want to delete this futures trading bot? This action cannot be undone and will delete all associated trades, signals, and logs.')">
+                    @csrf
+                    @method('DELETE')
+                    <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                        <i class="fas fa-trash mr-2"></i>Delete Bot
+                    </button>
+                </form>
             </div>
         </div>
     </x-slot>
@@ -160,12 +168,15 @@
             <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                 <div class="border-b border-gray-200">
                     <nav class="-mb-px flex space-x-8 px-6">
-                        <a href="#trades" class="border-b-2 border-blue-500 py-4 px-1 text-sm font-medium text-blue-600">
-                            Recent Trades
-                        </a>
-                        <a href="#signals" class="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
-                            Recent Signals
-                        </a>
+                                    <a href="#trades" class="border-b-2 border-blue-500 py-4 px-1 text-sm font-medium text-blue-600">
+                Recent Trades
+            </a>
+            <a href="#signals" class="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                Recent Signals
+            </a>
+            <a href="{{ route('futures-bots.logs', $futuresBot) }}" class="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                View Logs
+            </a>
                     </nav>
                 </div>
 

@@ -113,6 +113,9 @@
                             <a href="{{ route('futures-bots.show', $bot) }}" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-800 font-medium py-2 px-4 rounded text-center transition duration-200">
                                 <i class="fas fa-eye mr-1"></i> View
                             </a>
+                            <a href="{{ route('futures-bots.logs', $bot) }}" class="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-800 font-medium py-2 px-4 rounded text-center transition duration-200">
+                                <i class="fas fa-list mr-1"></i> Logs
+                            </a>
                             
                             @if($bot->is_active)
                                 <form method="POST" action="{{ route('futures-bots.run', $bot) }}" class="flex-1">
@@ -136,6 +139,17 @@
                             <a href="{{ route('futures-bots.edit', $bot) }}" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded text-center transition duration-200">
                                 <i class="fas fa-edit mr-1"></i> Edit
                             </a>
+                        </div>
+
+                        <div class="flex space-x-2 mt-2">
+                            <form method="POST" action="{{ route('futures-bots.destroy', $bot) }}" class="flex-1" 
+                                onsubmit="return confirm('Are you sure you want to delete this futures trading bot? This action cannot be undone and will delete all associated trades, signals, and logs.')">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded transition duration-200">
+                                    <i class="fas fa-trash mr-1"></i> Delete
+                                </button>
+                            </form>
                         </div>
 
                         @if($bot->openTrades()->count() > 0)

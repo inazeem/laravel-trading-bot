@@ -16,10 +16,46 @@ class FuturesTradingBotService
     private SmartMoneyConceptsService $smcService;
     private FuturesTradingBotLogger $logger;
     private array $timeframeIntervals = [
-        '1m' => '1minute',
-        '5m' => '5minute', 
-        '15m' => '15minute'
+        '1m' => '1m',
+        '5m' => '5m', 
+        '15m' => '15m',
+        '30m' => '30m',
+        '1h' => '1h',
+        '4h' => '4h',
+        '1d' => '1d'
     ];
+
+    /**
+     * Get the correct interval format for the exchange
+     */
+    private function getExchangeInterval(string $timeframe): string
+    {
+        if ($this->bot->exchange === 'kucoin') {
+            // KuCoin uses different interval formats
+            $kucoinIntervals = [
+                '1m' => '1minute',
+                '5m' => '5minute',
+                '15m' => '15minute',
+                '30m' => '30minute',
+                '1h' => '1hour',
+                '4h' => '4hour',
+                '1d' => '1day'
+            ];
+            return $kucoinIntervals[$timeframe] ?? $timeframe;
+        }
+        
+        // Binance and other exchanges use standard formats
+        return $this->timeframeIntervals[$timeframe] ?? $timeframe;
+    }
+
+    /**
+     * Filter timeframes based on exchange support
+     */
+    private function getSupportedTimeframes(): array
+    {
+        // Both KuCoin and Binance support all timeframes
+        return $this->bot->timeframes;
+    }
 
     public function __construct(FuturesTradingBot $bot)
     {
@@ -82,10 +118,17 @@ class FuturesTradingBotService
     {
         $allSignals = [];
         
-        $this->logger->info("📊 [TIMEFRAMES] Analyzing " . count($this->bot->timeframes) . " timeframes for futures...");
+        $supportedTimeframes = $this->getSupportedTimeframes();
         
-        foreach ($this->bot->timeframes as $timeframe) {
-            $interval = $this->timeframeIntervals[$timeframe] ?? $timeframe;
+        if (empty($supportedTimeframes)) {
+            $this->logger->warning("⚠️ [TIMEFRAMES] No supported timeframes found for {$this->bot->exchange}. Available timeframes: " . implode(', ', $this->bot->timeframes));
+            return $allSignals;
+        }
+        
+        $this->logger->info("📊 [TIMEFRAMES] Analyzing " . count($supportedTimeframes) . " supported timeframes for futures...");
+        
+        foreach ($supportedTimeframes as $timeframe) {
+            $interval = $this->getExchangeInterval($timeframe);
             
             $this->logger->info("⏰ [TIMEFRAME] Processing {$timeframe} timeframe (interval: {$interval})...");
             
@@ -157,16 +200,25 @@ class FuturesTradingBotService
         
         foreach ($signals as $signal) {
             // Minimum strength threshold
-            if (($signal['strength'] ?? 0) < 0.6) {
+            if (($signal['strength'] ?? 0) < 0.5) {
                 continue;
             }
             
             // Check for signal confluence across timeframes
             $confluence = $this->calculateSignalConfluence($signal, $signals);
             
-            if ($confluence >= 2) { // At least 2 timeframes showing same signal
-                $signal['confluence'] = $confluence;
-                $filtered[] = $signal;
+            // If only one timeframe is configured, accept signals with good strength
+            if (count($this->bot->timeframes) === 1) {
+                if (($signal['strength'] ?? 0) >= 0.5) {
+                    $signal['confluence'] = 1; // Single timeframe confluence
+                    $filtered[] = $signal;
+                }
+            } else {
+                // Multiple timeframes: require confluence
+                if ($confluence >= 1) { // At least 1 other timeframe showing same signal
+                    $signal['confluence'] = $confluence;
+                    $filtered[] = $signal;
+                }
             }
         }
         
@@ -392,10 +444,13 @@ class FuturesTradingBotService
      */
     private function saveFuturesTrade(array $signal, array $order, float $currentPrice, float $stopLoss, float $takeProfit): void
     {
+        // Map signal direction to trade side
+        $tradeSide = $signal['direction'] === 'bullish' ? 'long' : 'short';
+        
         $trade = FuturesTrade::create([
             'futures_trading_bot_id' => $this->bot->id,
             'symbol' => $this->bot->symbol,
-            'side' => $signal['direction'],
+            'side' => $tradeSide,
             'quantity' => $order['quantity'] ?? 0,
             'entry_price' => $currentPrice,
             'stop_loss' => $stopLoss,

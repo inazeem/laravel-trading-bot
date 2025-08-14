@@ -179,9 +179,18 @@ class TradingBotService
             // Check for signal confluence across timeframes
             $confluence = $this->calculateSignalConfluence($signal, $signals);
             
-            if ($confluence >= 2) { // At least 2 timeframes showing same signal
-                $signal['confluence'] = $confluence;
-                $filtered[] = $signal;
+            // If only one timeframe is configured, accept signals with good strength
+            if (count($this->bot->timeframes) === 1) {
+                if (($signal['strength'] ?? 0) >= 0.5) {
+                    $signal['confluence'] = 1; // Single timeframe confluence
+                    $filtered[] = $signal;
+                }
+            } else {
+                // Multiple timeframes: require confluence
+                if ($confluence >= 1) { // At least 1 other timeframe showing same signal
+                    $signal['confluence'] = $confluence;
+                    $filtered[] = $signal;
+                }
             }
         }
         

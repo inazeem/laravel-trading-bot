@@ -271,6 +271,35 @@ class FuturesTradingBotController extends Controller
         return view('futures-bots.signals', compact('futuresBot', 'signals'));
     }
 
+    public function logs(FuturesTradingBot $futuresBot)
+    {
+        // Ensure user owns this bot
+        if ($futuresBot->user_id !== Auth::id()) {
+            abort(403);
+        }
+        
+        $logs = $futuresBot->logs()->latest()->paginate(50);
+        $summary = (new \App\Services\FuturesTradingBotLogger($futuresBot))->getLastRunSummary();
+        
+        return view('futures-bots.logs', compact('futuresBot', 'logs', 'summary'));
+    }
+
+    public function clearLogs(FuturesTradingBot $futuresBot)
+    {
+        // Ensure user owns this bot
+        if ($futuresBot->user_id !== Auth::id()) {
+            abort(403);
+        }
+        
+        try {
+            $futuresBot->logs()->delete();
+            
+            return back()->with('success', 'All logs for this futures trading bot have been cleared successfully.');
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to clear logs.');
+        }
+    }
+
     public function closePosition(FuturesTradingBot $futuresBot)
     {
         // Ensure user owns this bot
