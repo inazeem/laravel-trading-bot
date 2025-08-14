@@ -7,6 +7,7 @@ use App\Models\FuturesTrade;
 use App\Models\FuturesSignal;
 use Illuminate\Support\Facades\Log;
 use App\Services\FuturesTradingBotLogger;
+use App\Services\SmartMoneyConceptsService;
 use Illuminate\Support\Facades\DB;
 
 class FuturesTradingBotService
@@ -374,31 +375,153 @@ class FuturesTradingBotService
     }
 
     /**
-     * Calculate stop loss for futures
+     * Calculate stop loss for futures using SMC levels
      */
     private function calculateStopLoss(array $signal, float $currentPrice): float
     {
+        // Get SMC levels for better stop loss placement
+        $smcLevels = $this->getSMCLevels();
+        
+        if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
+            // For long positions, find the nearest support level below current price
+            $supportLevels = array_filter($smcLevels, function($level) use ($currentPrice) {
+                return $level['type'] === 'support' && $level['price'] < $currentPrice;
+            });
+            
+            if (!empty($supportLevels)) {
+                // Sort by price (highest first) and take the closest support
+                usort($supportLevels, function($a, $b) {
+                    return $b['price'] <=> $a['price'];
+                });
+                $nearestSupport = $supportLevels[0]['price'];
+                
+                // Add a small buffer below the support level
+                $stopLoss = $nearestSupport * 0.995; // 0.5% below support
+                
+                $this->logger->info("SMC Stop Loss for long: Using support level at {$nearestSupport}, stop loss set at {$stopLoss}");
+                return $stopLoss;
+            }
+        } else {
+            // For short positions, find the nearest resistance level above current price
+            $resistanceLevels = array_filter($smcLevels, function($level) use ($currentPrice) {
+                return $level['type'] === 'resistance' && $level['price'] > $currentPrice;
+            });
+            
+            if (!empty($resistanceLevels)) {
+                // Sort by price (lowest first) and take the closest resistance
+                usort($resistanceLevels, function($a, $b) {
+                    return $a['price'] <=> $b['price'];
+                });
+                $nearestResistance = $resistanceLevels[0]['price'];
+                
+                // Add a small buffer above the resistance level
+                $stopLoss = $nearestResistance * 1.005; // 0.5% above resistance
+                
+                $this->logger->info("SMC Stop Loss for short: Using resistance level at {$nearestResistance}, stop loss set at {$stopLoss}");
+                return $stopLoss;
+            }
+        }
+        
+        // Fallback to percentage-based stop loss if no SMC levels found
         $stopLossPercentage = $this->bot->stop_loss_percentage / 100;
         
-        if ($signal['direction'] === 'long') {
-            return $currentPrice * (1 - $stopLossPercentage);
+        if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
+            $fallbackStopLoss = $currentPrice * (1 - $stopLossPercentage);
+            $this->logger->info("Using fallback percentage stop loss: {$fallbackStopLoss}");
+            return $fallbackStopLoss;
         } else {
-            return $currentPrice * (1 + $stopLossPercentage);
+            $fallbackStopLoss = $currentPrice * (1 + $stopLossPercentage);
+            $this->logger->info("Using fallback percentage stop loss: {$fallbackStopLoss}");
+            return $fallbackStopLoss;
         }
     }
 
     /**
-     * Calculate take profit for futures
+     * Calculate take profit for futures using SMC levels
      */
     private function calculateTakeProfit(array $signal, float $currentPrice): float
     {
+        // Get SMC levels for better take profit placement
+        $smcLevels = $this->getSMCLevels();
+        
+        if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
+            // For long positions, find the nearest resistance level above current price
+            $resistanceLevels = array_filter($smcLevels, function($level) use ($currentPrice) {
+                return $level['type'] === 'resistance' && $level['price'] > $currentPrice;
+            });
+            
+            if (!empty($resistanceLevels)) {
+                // Sort by price (lowest first) and take the closest resistance
+                usort($resistanceLevels, function($a, $b) {
+                    return $a['price'] <=> $b['price'];
+                });
+                $nearestResistance = $resistanceLevels[0]['price'];
+                
+                // Set take profit at the resistance level
+                $takeProfit = $nearestResistance;
+                
+                $this->logger->info("SMC Take Profit for long: Using resistance level at {$takeProfit}");
+                return $takeProfit;
+            }
+        } else {
+            // For short positions, find the nearest support level below current price
+            $supportLevels = array_filter($smcLevels, function($level) use ($currentPrice) {
+                return $level['type'] === 'support' && $level['price'] < $currentPrice;
+            });
+            
+            if (!empty($supportLevels)) {
+                // Sort by price (highest first) and take the closest support
+                usort($supportLevels, function($a, $b) {
+                    return $b['price'] <=> $a['price'];
+                });
+                $nearestSupport = $supportLevels[0]['price'];
+                
+                // Set take profit at the support level
+                $takeProfit = $nearestSupport;
+                
+                $this->logger->info("SMC Take Profit for short: Using support level at {$takeProfit}");
+                return $takeProfit;
+            }
+        }
+        
+        // Fallback to percentage-based take profit if no SMC levels found
         $takeProfitPercentage = $this->bot->take_profit_percentage / 100;
         
-        if ($signal['direction'] === 'long') {
-            return $currentPrice * (1 + $takeProfitPercentage);
+        if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
+            $fallbackTakeProfit = $currentPrice * (1 + $takeProfitPercentage);
+            $this->logger->info("Using fallback percentage take profit: {$fallbackTakeProfit}");
+            return $fallbackTakeProfit;
         } else {
-            return $currentPrice * (1 - $takeProfitPercentage);
+            $fallbackTakeProfit = $currentPrice * (1 - $takeProfitPercentage);
+            $this->logger->info("Using fallback percentage take profit: {$fallbackTakeProfit}");
+            return $fallbackTakeProfit;
         }
+    }
+
+    /**
+     * Get SMC levels for stop loss and take profit calculation
+     */
+    private function getSMCLevels(): array
+    {
+        $levels = [];
+        
+        // Get candlestick data for SMC analysis
+        $candles = $this->exchangeService->getCandles($this->bot->symbol, $this->bot->timeframes[0], 500);
+        
+        if (empty($candles)) {
+            $this->logger->warning("No candlestick data available for SMC analysis");
+            return $levels;
+        }
+        
+        // Create SMC service instance
+        $smcService = new SmartMoneyConceptsService($candles);
+        
+        // Get all SMC levels
+        $levels = $smcService->getSupportResistanceLevels();
+        
+        $this->logger->info("Retrieved " . count($levels) . " SMC levels for analysis");
+        
+        return $levels;
     }
 
     /**
