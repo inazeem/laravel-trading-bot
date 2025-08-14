@@ -50,16 +50,22 @@ class ExchangeService
     public function getCurrentPrice($symbol)
     {
         try {
+            // Normalize symbol format for Binance (remove hyphens)
+            $normalizedSymbol = str_replace('-', '', $symbol);
+            
+            Log::info("Fetching price for symbol: {$symbol} (normalized: {$normalizedSymbol})");
+            
             switch ($this->exchange) {
                 case 'kucoin':
                     return $this->getKuCoinPrice($symbol);
                 case 'binance':
-                    return $this->getBinancePrice($symbol);
+                    return $this->getBinancePrice($normalizedSymbol);
                 default:
                     throw new \Exception("Unsupported exchange: {$this->exchange}");
             }
         } catch (\Exception $e) {
             Log::error("Error fetching price for {$symbol}: " . $e->getMessage());
+            Log::error("Stack trace: " . $e->getTraceAsString());
             return null;
         }
     }
@@ -218,16 +224,22 @@ class ExchangeService
     public function getCandles($symbol, $interval = '1h', $limit = 500)
     {
         try {
+            // Normalize symbol format for Binance (remove hyphens)
+            $normalizedSymbol = str_replace('-', '', $symbol);
+            
+            Log::info("Fetching candles for symbol: {$symbol} (normalized: {$normalizedSymbol})");
+            
             switch ($this->exchange) {
                 case 'kucoin':
                     return $this->getKuCoinCandles($symbol, $interval, $limit);
                 case 'binance':
-                    return $this->getBinanceCandles($symbol, $interval, $limit);
+                    return $this->getBinanceCandles($normalizedSymbol, $interval, $limit);
                 default:
                     throw new \Exception("Unsupported exchange: {$this->exchange}");
             }
         } catch (\Exception $e) {
             Log::error("Error fetching candles for {$symbol}: " . $e->getMessage());
+            Log::error("Stack trace: " . $e->getTraceAsString());
             return [];
         }
     }
@@ -421,13 +433,19 @@ class ExchangeService
 
     private function getBinancePrice($symbol)
     {
-        $response = Http::get("https://api.binance.com/api/v3/ticker/price?symbol={$symbol}");
+        $url = "https://api.binance.com/api/v3/ticker/price?symbol={$symbol}";
+        Log::info("Making request to: {$url}");
+        
+        $response = Http::get($url);
         
         if ($response->successful()) {
             $data = $response->json();
-            return (float) $data['price'];
+            $price = (float) $data['price'];
+            Log::info("Successfully fetched price for {$symbol}: {$price}");
+            return $price;
         }
         
+        Log::error("Failed to fetch price for {$symbol}. Status: {$response->status()}, Response: {$response->body()}");
         return null;
     }
 
@@ -538,11 +556,16 @@ class ExchangeService
      */
     private function getKuCoinCandles($symbol, $interval = '1h', $limit = 500)
     {
-        $response = Http::get("https://api.kucoin.com/api/v1/market/candles", [
+        $url = "https://api.kucoin.com/api/v1/market/candles";
+        $params = [
             'symbol' => $symbol,
             'type' => $interval,
             'limit' => $limit
-        ]);
+        ];
+        
+        Log::info("Making KuCoin request to: {$url} with params: " . json_encode($params));
+        
+        $response = Http::get($url, $params);
         
         if ($response->successful()) {
             $data = $response->json();
@@ -563,9 +586,11 @@ class ExchangeService
                 }
             }
             
+            Log::info("Successfully fetched " . count($candles) . " KuCoin candlesticks for {$symbol} with interval {$interval}");
             return array_reverse($candles); // Return in chronological order
         }
         
+        Log::error("Failed to fetch KuCoin candles for {$symbol} with interval {$interval}. Status: {$response->status()}, Response: {$response->body()}");
         return [];
     }
 

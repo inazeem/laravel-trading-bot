@@ -16,10 +16,29 @@ class TradingBotService
     private SmartMoneyConceptsService $smcService;
     private TradingBotLogger $logger;
     private array $timeframeIntervals = [
-        '1h' => '1hour',
-        '4h' => '4hour', 
-        '1d' => '1day'
+        '1h' => '1h',
+        '4h' => '4h', 
+        '1d' => '1d'
     ];
+
+    /**
+     * Get the correct interval format for the exchange
+     */
+    private function getExchangeInterval(string $timeframe): string
+    {
+        if ($this->bot->exchange === 'kucoin') {
+            // KuCoin uses different interval formats
+            $kucoinIntervals = [
+                '1h' => '1hour',
+                '4h' => '4hour',
+                '1d' => '1day'
+            ];
+            return $kucoinIntervals[$timeframe] ?? $timeframe;
+        }
+        
+        // Binance and other exchanges use standard formats
+        return $this->timeframeIntervals[$timeframe] ?? $timeframe;
+    }
 
     public function __construct(TradingBot $bot)
     {
@@ -81,7 +100,7 @@ class TradingBotService
         $this->logger->info("📊 [TIMEFRAMES] Analyzing " . count($this->bot->timeframes) . " timeframes...");
         
         foreach ($this->bot->timeframes as $timeframe) {
-            $interval = $this->timeframeIntervals[$timeframe] ?? $timeframe;
+            $interval = $this->getExchangeInterval($timeframe);
             
             $this->logger->info("⏰ [TIMEFRAME] Processing {$timeframe} timeframe (interval: {$interval})...");
             
