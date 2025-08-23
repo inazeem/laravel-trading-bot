@@ -8,6 +8,8 @@ use App\Models\FuturesSignal;
 use Illuminate\Support\Facades\Log;
 use App\Services\FuturesTradingBotLogger;
 use App\Services\SmartMoneyConceptsService;
+use App\Services\BitcoinCorrelationService;
+use App\Services\TradingLearningService;
 use Illuminate\Support\Facades\DB;
 
 class FuturesTradingBotService
@@ -15,6 +17,8 @@ class FuturesTradingBotService
     private FuturesTradingBot $bot;
     private ExchangeService $exchangeService;
     private SmartMoneyConceptsService $smcService;
+    private BitcoinCorrelationService $btcCorrelationService;
+    private TradingLearningService $learningService;
     private FuturesTradingBotLogger $logger;
     private array $timeframeIntervals = [
         '1m' => '1m',
@@ -62,6 +66,8 @@ class FuturesTradingBotService
     {
         $this->bot = $bot->load('apiKey');
         $this->exchangeService = new ExchangeService($bot->apiKey);
+        $this->btcCorrelationService = new BitcoinCorrelationService($this->exchangeService);
+        $this->learningService = new TradingLearningService($bot);
         $this->logger = new FuturesTradingBotLogger($bot);
     }
 
@@ -76,6 +82,12 @@ class FuturesTradingBotService
             $this->logger->info("⚙️ [CONFIG] Risk: {$this->bot->risk_percentage}%, Max Position: {$this->bot->max_position_size}");
             $this->logger->info("⚙️ [CONFIG] Leverage: {$this->bot->leverage}x, Margin: {$this->bot->margin_type}");
             $this->logger->info("⏰ [CONFIG] Timeframes: " . implode(', ', $this->bot->timeframes));
+            
+            // Sync positions with exchange before processing
+            $this->syncPositionsWithExchange();
+            
+            // Learn from trading history and apply improvements
+            $this->learnFromTradingHistory();
             
             // Update bot status
             $this->bot->update(['status' => 'running', 'last_run_at' => now()]);
@@ -200,30 +212,43 @@ class FuturesTradingBotService
     private function filterSignals(array $signals): array
     {
         $filtered = [];
+        $this->logger->info("🔍 [FILTER] Starting to filter " . count($signals) . " signals...");
         
-        foreach ($signals as $signal) {
+        foreach ($signals as $index => $signal) {
+            $this->logger->info("🔍 [FILTER] Processing signal {$index}: " . json_encode($signal));
+            
             // Minimum strength threshold
             if (($signal['strength'] ?? 0) < 0.5) {
+                $this->logger->info("❌ [FILTER] Signal {$index} rejected - strength too low: " . ($signal['strength'] ?? 0));
                 continue;
             }
             
+            $this->logger->info("✅ [FILTER] Signal {$index} passed strength check");
+            
             // Check for signal confluence across timeframes
             $confluence = $this->calculateSignalConfluence($signal, $signals);
+            $this->logger->info("🔗 [FILTER] Signal {$index} confluence: {$confluence}");
             
             // If only one timeframe is configured, accept signals with good strength
             if (count($this->bot->timeframes) === 1) {
                 if (($signal['strength'] ?? 0) >= 0.5) {
                     $signal['confluence'] = 1; // Single timeframe confluence
                     $filtered[] = $signal;
+                    $this->logger->info("✅ [FILTER] Signal {$index} accepted (single timeframe)");
                 }
             } else {
                 // Multiple timeframes: require confluence
                 if ($confluence >= 1) { // At least 1 other timeframe showing same signal
                     $signal['confluence'] = $confluence;
                     $filtered[] = $signal;
+                    $this->logger->info("✅ [FILTER] Signal {$index} accepted (multi-timeframe confluence)");
+                } else {
+                    $this->logger->info("❌ [FILTER] Signal {$index} rejected - insufficient confluence: {$confluence}");
                 }
             }
         }
+        
+        $this->logger->info("📊 [FILTER] Filtering complete: " . count($filtered) . " signals passed");
         
         // Sort by confluence and strength
         usort($filtered, function($a, $b) {
@@ -258,12 +283,16 @@ class FuturesTradingBotService
      */
     private function processSignal(array $signal, float $currentPrice): void
     {
+        $this->logger->info("🔄 [PROCESS SIGNAL] Processing signal: " . json_encode($signal));
+        
         // Check if we already have an open position
         $openTrade = $this->getOpenTrade();
         
         if ($openTrade) {
+            $this->logger->info("📊 [EXISTING POSITION] Found open trade: " . json_encode($openTrade->toArray()));
             $this->handleExistingPosition($openTrade, $signal, $currentPrice);
         } else {
+            $this->logger->info("🆕 [NO OPEN POSITION] No open trade found - handling new signal");
             $this->handleNewSignal($signal, $currentPrice);
         }
     }
@@ -273,51 +302,95 @@ class FuturesTradingBotService
      */
     private function handleNewSignal(array $signal, float $currentPrice): void
     {
+        $this->logger->info("🚀 [NEW SIGNAL] Starting to process new signal: " . json_encode($signal));
+        
         // Check if we're in cooldown period after closing a position
         if ($this->isInCooldownPeriod()) {
             $this->logger->info("⏰ [COOLDOWN] Skipping new signal - bot is in cooldown period after recent position closure");
             return;
         }
         
+        $this->logger->info("✅ [COOLDOWN] Not in cooldown period - proceeding");
+        
         // Check position side restrictions
         if (!$this->canTakePosition($signal['direction'])) {
             $this->logger->info("🚫 [RESTRICTION] Cannot take {$signal['direction']} position due to bot configuration");
             return;
         }
+        
+        $this->logger->info("✅ [RESTRICTION] Position side check passed - proceeding");
+        
+        // Check Bitcoin correlation if enabled and not trading BTC itself
+        if ($this->bot->enable_bitcoin_correlation && $this->bot->symbol !== 'BTC-USDT') {
+            $this->logger->info("🔗 [BTC CORRELATION] Checking Bitcoin correlation for {$signal['direction']} signal...");
+            
+            $recommendation = $this->btcCorrelationService->getCorrelationRecommendation($signal, $signal['timeframe']);
+            
+            $this->logger->info("🔗 [BTC CORRELATION] BTC Sentiment: {$recommendation['btc_sentiment']}, Recommendation: {$recommendation['reason']}");
+            
+            if (!$recommendation['should_trade']) {
+                $this->logger->info("🚫 [BTC CORRELATION] Skipping trade - {$recommendation['reason']}");
+                return;
+            }
+            
+            $this->logger->info("✅ [BTC CORRELATION] Bitcoin correlation check passed - proceeding with trade");
+        } else {
+            $this->logger->info("✅ [BTC CORRELATION] Bitcoin correlation check skipped (disabled or BTC trading)");
+        }
+
+        // Close any existing position first
+        $this->closeExistingPosition();
 
         // Calculate position size
         $positionSize = $this->calculatePositionSize($currentPrice);
         
+        $this->logger->info("💰 [POSITION SIZE] Calculated position size: {$positionSize}");
+        
         if ($positionSize <= 0) {
-            $this->logger->warning("Insufficient balance for futures trade - Position size calculated as: {$positionSize}");
+            $this->logger->warning("❌ [POSITION SIZE] Insufficient balance for futures trade - Position size calculated as: {$positionSize}");
             return;
         }
+        
+        $this->logger->info("✅ [POSITION SIZE] Position size check passed");
         
         // Calculate stop loss and take profit
         $stopLoss = $this->calculateStopLoss($signal, $currentPrice);
         $takeProfit = $this->calculateTakeProfit($signal, $currentPrice);
         
+        $this->logger->info("🎯 [RISK MANAGEMENT] Calculated Stop Loss: {$stopLoss}, Take Profit: {$takeProfit}");
+        
         // Validate risk/reward ratio
         $riskRewardRatio = $this->calculateRiskRewardRatio($currentPrice, $stopLoss, $takeProfit);
-        if ($riskRewardRatio < 1.5) {
-            $this->logger->info("Risk/reward ratio too low: {$riskRewardRatio}");
+        $this->logger->info("📊 [RISK/REWARD] Calculated ratio: {$riskRewardRatio}");
+        
+        // Use bot's minimum risk/reward ratio configuration
+        $minRiskReward = $this->bot->min_risk_reward_ratio;
+        
+        if ($riskRewardRatio < $minRiskReward) {
+            $this->logger->info("❌ [RISK/REWARD] Risk/reward ratio too low: {$riskRewardRatio} (minimum: {$minRiskReward}) - skipping trade");
             return;
         }
         
-        // Log the calculated TP and SL
-        $this->logger->info("🎯 [RISK MANAGEMENT] Calculated Stop Loss: {$stopLoss}, Take Profit: {$takeProfit}");
+        $this->logger->info("✅ [RISK/REWARD] Risk/reward ratio check passed");
         
         // Place the futures order with stop loss and take profit
+        $this->logger->info("📤 [ORDER] Attempting to place futures order...");
         $order = $this->placeFuturesOrder($signal, $positionSize, $stopLoss, $takeProfit);
         
         if ($order) {
+            $this->logger->info("✅ [ORDER] Futures order placed successfully: " . json_encode($order));
+            
             // Save trade to database
+            $this->logger->info("💾 [DATABASE] Saving trade to database...");
             $this->saveFuturesTrade($signal, $order, $currentPrice, $stopLoss, $takeProfit);
             
             // Save signal
+            $this->logger->info("💾 [DATABASE] Saving signal to database...");
             $this->saveFuturesSignal($signal, $currentPrice, $stopLoss, $takeProfit, $riskRewardRatio);
             
-            $this->logger->info("Futures order placed successfully: {$order['order_id']}");
+            $this->logger->info("🎉 [SUCCESS] Complete trade process finished successfully");
+        } else {
+            $this->logger->error("❌ [ORDER] Failed to place futures order");
         }
     }
 
@@ -373,8 +446,12 @@ class FuturesTradingBotService
         $usdtBalance = 0;
         
         foreach ($balance as $bal) {
-            if ($bal['currency'] === 'USDT') {
-                $usdtBalance = $bal['available'];
+            // Handle both Binance (asset) and KuCoin (currency) formats
+            $currency = $bal['currency'] ?? $bal['asset'] ?? null;
+            $available = $bal['available'] ?? $bal['free'] ?? 0;
+            
+            if ($currency === 'USDT' && $available > 0) {
+                $usdtBalance = (float) $available;
                 break;
             }
         }
@@ -398,6 +475,16 @@ class FuturesTradingBotService
         if ($positionSize > $maxPositionSize) {
             $positionSize = $maxPositionSize;
             $this->logger->info("Position size limited by max position size: {$positionSize}");
+        }
+        
+        // Ensure minimum notional value from bot configuration
+        $minNotionalValue = $this->bot->min_order_value + 0.5; // Add small buffer for rounding
+        $currentNotional = $positionSize * $currentPrice;
+        
+        if ($currentNotional < $minNotionalValue) {
+            $minPositionSize = ceil(($minNotionalValue / $currentPrice) * 10) / 10; // Round up to nearest 0.1
+            $this->logger->info("Position notional below minimum ({$currentNotional} USDT), adjusting position size from {$positionSize} to {$minPositionSize} (min order value: {$this->bot->min_order_value} USDT)");
+            $positionSize = $minPositionSize;
         }
         
         return $positionSize;
@@ -486,11 +573,14 @@ class FuturesTradingBotService
                 });
                 $nearestResistance = $resistanceLevels[0]['price'];
                 
-                // Set take profit at the resistance level
-                $takeProfit = $nearestResistance;
-                
-                $this->logger->info("SMC Take Profit for long: Using resistance level at {$takeProfit}");
-                return $takeProfit;
+                // Check if the resistance level provides a reasonable reward (at least 0.5% from current price)
+                $minRewardDistance = $currentPrice * 0.005; // 0.5% minimum reward
+                if (($nearestResistance - $currentPrice) >= $minRewardDistance) {
+                    $this->logger->info("SMC Take Profit for long: Using resistance level at {$nearestResistance}");
+                    return $nearestResistance;
+                } else {
+                    $this->logger->info("SMC resistance level too close ({$nearestResistance}), using percentage-based take profit");
+                }
             }
         } else {
             // For short positions, find the nearest support level below current price
@@ -505,11 +595,14 @@ class FuturesTradingBotService
                 });
                 $nearestSupport = $supportLevels[0]['price'];
                 
-                // Set take profit at the support level
-                $takeProfit = $nearestSupport;
-                
-                $this->logger->info("SMC Take Profit for short: Using support level at {$takeProfit}");
-                return $takeProfit;
+                // Check if the support level provides a reasonable reward (at least 0.5% from current price)
+                $minRewardDistance = $currentPrice * 0.005; // 0.5% minimum reward
+                if (($currentPrice - $nearestSupport) >= $minRewardDistance) {
+                    $this->logger->info("SMC Take Profit for short: Using support level at {$nearestSupport}");
+                    return $nearestSupport;
+                } else {
+                    $this->logger->info("SMC support level too close ({$nearestSupport}), using percentage-based take profit");
+                }
             }
         }
         
@@ -554,6 +647,30 @@ class FuturesTradingBotService
     }
 
     /**
+     * Close any existing position before placing new one
+     */
+    private function closeExistingPosition(): void
+    {
+        $openTrade = $this->getOpenTrade();
+        
+        if ($openTrade) {
+            $this->logger->info("🔄 [CLOSE EXISTING] Found open position - closing before new trade");
+            
+            // Get current price
+            $currentPrice = $this->exchangeService->getCurrentPrice($this->bot->symbol);
+            
+            if ($currentPrice) {
+                $this->closePosition($openTrade, $currentPrice);
+                $this->logger->info("✅ [CLOSE EXISTING] Position closed successfully");
+            } else {
+                $this->logger->error("❌ [CLOSE EXISTING] Failed to get current price for closing position");
+            }
+        } else {
+            $this->logger->info("✅ [CLOSE EXISTING] No existing position to close");
+        }
+    }
+
+    /**
      * Calculate risk/reward ratio
      */
     private function calculateRiskRewardRatio(float $currentPrice, float $stopLoss, float $takeProfit): float
@@ -584,13 +701,77 @@ class FuturesTradingBotService
                 $this->bot->leverage,
                 $this->bot->margin_type,
                 $stopLoss,
-                $takeProfit
+                $takeProfit,
+                $this->bot->order_type,
+                $this->bot->limit_order_buffer
             );
+            
+            // If main order is successful, place SL/TP orders
+            if ($orderResult && $orderResult['order_id']) {
+                $this->logger->info("Main order placed successfully, now placing SL/TP orders");
+                $slTpResult = $this->placeStopLossAndTakeProfitOrders($orderResult, $stopLoss, $takeProfit);
+                
+                // Update the order result with SL/TP order IDs
+                $orderResult['stop_loss_order_id'] = $slTpResult['stop_loss_order_id'] ?? null;
+                $orderResult['take_profit_order_id'] = $slTpResult['take_profit_order_id'] ?? null;
+            }
             
             return $orderResult;
         } catch (\Exception $e) {
             $this->logger->error("Failed to place futures order: " . $e->getMessage());
             return null;
+        }
+    }
+    
+    /**
+     * Place stop loss and take profit orders
+     */
+    private function placeStopLossAndTakeProfitOrders(array $mainOrder, float $stopLoss, float $takeProfit): array
+    {
+        try {
+            $this->logger->info("Placing SL/TP orders for order ID: {$mainOrder['order_id']}");
+            
+            // Wait a moment for the main order to be processed
+            sleep(2);
+            
+            $stopLossOrderId = null;
+            $takeProfitOrderId = null;
+            
+            // Place stop loss order
+            if ($stopLoss !== null) {
+                $this->logger->info("Placing stop loss order at price: {$stopLoss}");
+                $stopLossOrderId = $this->exchangeService->placeStopLossOrder(
+                    $this->bot->symbol,
+                    $mainOrder['side'],
+                    $mainOrder['quantity'],
+                    $stopLoss
+                );
+                $this->logger->info("Stop loss order result: " . ($stopLossOrderId ? $stopLossOrderId : 'FAILED'));
+            }
+            
+            // Place take profit order
+            if ($takeProfit !== null) {
+                $this->logger->info("Placing take profit order at price: {$takeProfit}");
+                $takeProfitOrderId = $this->exchangeService->placeTakeProfitOrder(
+                    $this->bot->symbol,
+                    $mainOrder['side'],
+                    $mainOrder['quantity'],
+                    $takeProfit
+                );
+                $this->logger->info("Take profit order result: " . ($takeProfitOrderId ? $takeProfitOrderId : 'FAILED'));
+            }
+            
+            return [
+                'stop_loss_order_id' => $stopLossOrderId,
+                'take_profit_order_id' => $takeProfitOrderId
+            ];
+            
+        } catch (\Exception $e) {
+            $this->logger->error("Failed to place SL/TP orders: " . $e->getMessage());
+            return [
+                'stop_loss_order_id' => null,
+                'take_profit_order_id' => null
+            ];
         }
     }
 
@@ -614,6 +795,8 @@ class FuturesTradingBotService
             'margin_type' => $this->bot->margin_type,
             'status' => 'open',
             'order_id' => $order['order_id'] ?? null,
+            'stop_loss_order_id' => $order['stop_loss_order_id'] ?? null,
+            'take_profit_order_id' => $order['take_profit_order_id'] ?? null,
             'exchange_response' => $order,
             'opened_at' => now(),
         ]);
@@ -643,6 +826,143 @@ class FuturesTradingBotService
             'signal_data' => $signal,
             'executed' => true,
         ]);
+    }
+
+    /**
+     * Learn from trading history and apply improvements
+     */
+    private function learnFromTradingHistory(): void
+    {
+        try {
+            $this->logger->info("🧠 [LEARNING] Starting trading performance analysis...");
+            
+            // Get learning summary first
+            $summary = $this->learningService->getLearningSummary();
+            
+            if (isset($summary['message'])) {
+                $this->logger->info("ℹ️ [LEARNING] {$summary['message']}");
+                return;
+            }
+            
+            $this->logger->info("📊 [LEARNING] Trading Summary: {$summary['total_trades']} trades, {$summary['win_rate']}% win rate, {$summary['total_pnl']} total PnL");
+            
+            // Only run full analysis if we have enough data
+            if ($summary['total_trades'] >= 5) {
+                $analysis = $this->learningService->analyzeAndLearn();
+                
+                if (!empty($analysis['recommendations'])) {
+                    $this->logger->info("💡 [LEARNING] Recommendations:");
+                    foreach ($analysis['recommendations'] as $recommendation) {
+                        $this->logger->info("   - {$recommendation}");
+                    }
+                }
+                
+                if (!empty($analysis['risk_adjustments'])) {
+                    $this->logger->info("⚙️ [LEARNING] Risk adjustments applied based on performance");
+                }
+            } else {
+                $this->logger->info("⏳ [LEARNING] Need at least 5 trades for meaningful analysis (current: {$summary['total_trades']})");
+            }
+            
+        } catch (\Exception $e) {
+            $this->logger->error("❌ [LEARNING] Error during learning process: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Sync positions with exchange to ensure database accuracy
+     */
+    private function syncPositionsWithExchange(): void
+    {
+        try {
+            $this->logger->info("🔄 [SYNC] Syncing positions with exchange...");
+            
+            // Get actual open positions from exchange
+            $exchangePositions = $this->exchangeService->getOpenPositions($this->bot->symbol);
+            
+            if (empty($exchangePositions)) {
+                $this->logger->info("✅ [SYNC] No open positions found on exchange");
+                
+                // Check if we have any trades marked as open in database
+                $openTrades = $this->getOpenTrade();
+                if ($openTrades) {
+                    $this->logger->warning("⚠️ [SYNC] Found trade marked as open in database but no position on exchange");
+                    
+                    // Check order status
+                    $orderStatus = $this->exchangeService->getOrderStatus($openTrades->symbol, $openTrades->order_id);
+                    
+                    if ($orderStatus) {
+                        if ($orderStatus['status'] === 'FILLED') {
+                            $this->logger->info("✅ [SYNC] Order was filled - keeping trade as open");
+                        } elseif (in_array($orderStatus['status'], ['CANCELED', 'REJECTED', 'EXPIRED'])) {
+                            $this->logger->info("❌ [SYNC] Order was {$orderStatus['status']} - updating trade status to cancelled");
+                            $openTrades->update(['status' => 'cancelled']);
+                        } else {
+                            $this->logger->info("⏳ [SYNC] Order status: {$orderStatus['status']} - keeping as is");
+                        }
+                    }
+                }
+            } else {
+                $this->logger->info("📈 [SYNC] Found " . count($exchangePositions) . " open position(s) on exchange");
+                
+                foreach ($exchangePositions as $position) {
+                    // Normalize symbol for comparison
+                    $dbSymbol = str_replace('USDT', '-USDT', $position['symbol']);
+                    
+                    // Check if we have a corresponding trade in database
+                    $trade = FuturesTrade::where('futures_trading_bot_id', $this->bot->id)
+                        ->where('symbol', $dbSymbol)
+                        ->where('side', $position['side'])
+                        ->where('status', 'open')
+                        ->first();
+                    
+                    if ($trade) {
+                        $this->logger->info("✅ [SYNC] Found matching open trade in database (ID: {$trade->id})");
+                        
+                        // Update trade with current position data
+                        $trade->update([
+                            'quantity' => $position['quantity'],
+                            'entry_price' => $position['entry_price'],
+                            'unrealized_pnl' => $position['unrealized_pnl'],
+                            'leverage' => $position['leverage'],
+                            'margin_type' => $position['margin_type']
+                        ]);
+                        
+                        $this->logger->info("📝 [SYNC] Updated trade with current position data");
+                    } else {
+                        $this->logger->warning("⚠️ [SYNC] No matching open trade found in database");
+                        
+                        // Check if we have a closed trade that should be open
+                        $closedTrade = FuturesTrade::where('futures_trading_bot_id', $this->bot->id)
+                            ->where('symbol', $dbSymbol)
+                            ->where('side', $position['side'])
+                            ->where('status', 'closed')
+                            ->latest()
+                            ->first();
+                        
+                        if ($closedTrade) {
+                            $this->logger->info("🔄 [SYNC] Found closed trade that should be open - reopening...");
+                            
+                            $closedTrade->update([
+                                'status' => 'open',
+                                'quantity' => $position['quantity'],
+                                'entry_price' => $position['entry_price'],
+                                'unrealized_pnl' => $position['unrealized_pnl'],
+                                'exit_price' => null,
+                                'closed_at' => null
+                            ]);
+                            
+                            $this->logger->info("✅ [SYNC] Reopened trade ID {$closedTrade->id}");
+                        }
+                    }
+                }
+            }
+            
+            $this->logger->info("✅ [SYNC] Position synchronization completed");
+            
+        } catch (\Exception $e) {
+            $this->logger->error("❌ [SYNC] Error during position synchronization: " . $e->getMessage());
+        }
     }
 
     /**
