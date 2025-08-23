@@ -161,14 +161,14 @@ class ExchangeService
     /**
      * Place futures order
      */
-    public function placeFuturesOrder($symbol, $side, $quantity, $leverage, $marginType)
+    public function placeFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss = null, $takeProfit = null)
     {
         try {
             switch ($this->exchange) {
                 case 'kucoin':
-                    return $this->placeKuCoinFuturesOrder($symbol, $side, $quantity, $leverage, $marginType);
+                    return $this->placeKuCoinFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss, $takeProfit);
                 case 'binance':
-                    return $this->placeBinanceFuturesOrder($symbol, $side, $quantity, $leverage, $marginType);
+                    return $this->placeBinanceFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss, $takeProfit);
                 default:
                     throw new \Exception("Unsupported exchange: {$this->exchange}");
             }
@@ -749,7 +749,7 @@ class ExchangeService
     /**
      * Place KuCoin futures order
      */
-    private function placeKuCoinFuturesOrder($symbol, $side, $quantity, $leverage, $marginType)
+    private function placeKuCoinFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss = null, $takeProfit = null)
     {
         // Mock implementation for now
         return [
@@ -765,7 +765,7 @@ class ExchangeService
     /**
      * Place Binance futures order
      */
-    private function placeBinanceFuturesOrder($symbol, $side, $quantity, $leverage, $marginType)
+    private function placeBinanceFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss = null, $takeProfit = null)
     {
         // Get server time from Binance to ensure timestamp accuracy
         $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
@@ -789,11 +789,22 @@ class ExchangeService
             'timestamp' => (int)$timestamp
         ];
         
+        // Add stop loss if provided
+        if ($stopLoss !== null) {
+            $params['stopPrice'] = round($stopLoss, 4);
+            $params['stopLoss'] = round($stopLoss, 4);
+        }
+        
+        // Add take profit if provided
+        if ($takeProfit !== null) {
+            $params['takeProfit'] = round($takeProfit, 4);
+        }
+        
         $queryString = http_build_query($params);
         $signature = hash_hmac('sha256', $queryString, $this->secretKey);
         $params['signature'] = $signature;
         
-        Log::info("Placing Binance futures order: " . json_encode($params));
+        Log::info("Placing Binance futures order with TP/SL: " . json_encode($params));
         
         $response = Http::withHeaders([
             'X-MBX-APIKEY' => $this->apiKey

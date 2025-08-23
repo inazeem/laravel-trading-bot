@@ -304,8 +304,11 @@ class FuturesTradingBotService
             return;
         }
         
-        // Place the futures order
-        $order = $this->placeFuturesOrder($signal, $positionSize);
+        // Log the calculated TP and SL
+        $this->logger->info("🎯 [RISK MANAGEMENT] Calculated Stop Loss: {$stopLoss}, Take Profit: {$takeProfit}");
+        
+        // Place the futures order with stop loss and take profit
+        $order = $this->placeFuturesOrder($signal, $positionSize, $stopLoss, $takeProfit);
         
         if ($order) {
             // Save trade to database
@@ -568,7 +571,7 @@ class FuturesTradingBotService
     /**
      * Place futures order
      */
-    private function placeFuturesOrder(array $signal, float $positionSize): ?array
+    private function placeFuturesOrder(array $signal, float $positionSize, float $stopLoss, float $takeProfit): ?array
     {
         try {
             // Map signal direction to order side
@@ -579,7 +582,9 @@ class FuturesTradingBotService
                 $side,
                 $positionSize,
                 $this->bot->leverage,
-                $this->bot->margin_type
+                $this->bot->margin_type,
+                $stopLoss,
+                $takeProfit
             );
             
             return $orderResult;

@@ -32,13 +32,12 @@ return Application::configure(basePath: dirname(__DIR__))
             ->everyFiveMinutes()
             ->withoutOverlapping()
             ->runInBackground()
-            ->appendOutputTo(storage_path('logs/trading-bot-scheduler.log'));
+            ->appendOutputTo(storage_path('logs/spot-bot-scheduler.log'));
 
         $schedule->command('futures:run --all')
             ->everyMinute()
-            ->withoutOverlapping()
             ->runInBackground()
-            ->appendOutputTo(storage_path('logs/trading-bot-scheduler.log'));
+            ->appendOutputTo(storage_path('logs/futures-bot-scheduler.log'));
         
         // Alternative scheduling options (uncomment the one you prefer):
         
