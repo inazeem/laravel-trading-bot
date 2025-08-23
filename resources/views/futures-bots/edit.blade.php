@@ -186,31 +186,30 @@
                             </div>
 
                             <!-- Submit Buttons -->
-                            <div class="mt-8 flex justify-between items-center">
-                                <!-- Delete Button -->
-                                <form method="POST" action="{{ route('futures-bots.destroy', $futuresBot) }}" 
-                                    onsubmit="return confirm('Are you sure you want to delete this futures trading bot? This action cannot be undone and will delete all associated trades, signals, and logs.')">
-                                    @csrf
-                                    @method('DELETE')
-                                    <button type="submit" 
-                                        class="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition duration-200">
-                                        <i class="fas fa-trash mr-2"></i>Delete Bot
-                                    </button>
-                                </form>
-                                
-                                <!-- Update/Cancel Buttons -->
-                                <div class="flex space-x-4">
-                                    <a href="{{ route('futures-bots.show', $futuresBot) }}" 
-                                        class="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition duration-200">
-                                        Cancel
-                                    </a>
-                                    <button type="submit" 
-                                        class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition duration-200">
-                                        Update Futures Bot
-                                    </button>
-                                </div>
+                            <div class="mt-8 flex justify-end space-x-4">
+                                <a href="{{ route('futures-bots.show', $futuresBot) }}" 
+                                    class="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition duration-200">
+                                    Cancel
+                                </a>
+                                <button type="submit" 
+                                    class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition duration-200">
+                                    Update Futures Bot
+                                </button>
                             </div>
                         </form>
+                        
+                        <!-- Delete Button (Outside the main form) -->
+                        <div class="mt-4 pt-4 border-t border-gray-200">
+                            <form method="POST" action="{{ route('futures-bots.destroy', $futuresBot) }}" 
+                                onsubmit="return confirm('Are you sure you want to delete this futures trading bot? This action cannot be undone and will delete all associated trades, signals, and logs.')">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" 
+                                    class="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition duration-200">
+                                    <i class="fas fa-trash mr-2"></i>Delete Bot
+                                </button>
+                            </form>
+                        </div>
                     </div>
                 </div>
             </div>
