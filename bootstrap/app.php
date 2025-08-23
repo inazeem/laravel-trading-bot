@@ -28,14 +28,14 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withSchedule(function (Schedule $schedule) {
         // Run all active trading bots every 5 minutes
-        // $schedule->command('trading:run --all')
-        //     ->everyFifteenMinutes()
-        //     ->withoutOverlapping()
-        //     ->runInBackground()
-        //     ->appendOutputTo(storage_path('logs/trading-bot-scheduler.log'));
+        $schedule->command('trading:run --all')
+            ->everyFifteenMinutes()
+            ->withoutOverlapping()
+            ->runInBackground()
+            ->appendOutputTo(storage_path('logs/trading-bot-scheduler.log'));
 
         $schedule->command('futures:run --all')
-            ->everyFiveMinutes()
+            ->everyMinute()
             ->withoutOverlapping()
             ->runInBackground()
             ->appendOutputTo(storage_path('logs/trading-bot-scheduler.log'));
