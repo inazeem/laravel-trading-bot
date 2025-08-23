@@ -186,9 +186,11 @@ class FuturesTradingBotService
         
         Log::info("✅ [FILTER] " . count($filteredSignals) . " signals passed filtering criteria");
         
-        foreach ($filteredSignals as $index => $signal) {
-            Log::info("🎯 [PROCESS] Processing signal " . ($index + 1) . " of " . count($filteredSignals));
-            $this->processSignal($signal, $currentPrice);
+        // Only process the best signal to avoid conflicting actions
+        if (!empty($filteredSignals)) {
+            $bestSignal = $filteredSignals[0];
+            Log::info("🎯 [BEST SIGNAL] Processing best signal: Type: {$bestSignal['type']}, Direction: {$bestSignal['direction']}, Strength: {$bestSignal['strength']}, Confluence: {$bestSignal['confluence']}");
+            $this->processSignal($bestSignal, $currentPrice);
         }
     }
 
@@ -271,6 +273,12 @@ class FuturesTradingBotService
      */
     private function handleNewSignal(array $signal, float $currentPrice): void
     {
+        // Check if we're in cooldown period after closing a position
+        if ($this->isInCooldownPeriod()) {
+            $this->logger->info("⏰ [COOLDOWN] Skipping new signal - bot is in cooldown period after recent position closure");
+            return;
+        }
+        
         // Check position side restrictions
         if (!$this->canTakePosition($signal['direction'])) {
             $this->logger->info("🚫 [RESTRICTION] Cannot take {$signal['direction']} position due to bot configuration");
@@ -315,11 +323,26 @@ class FuturesTradingBotService
      */
     private function handleExistingPosition(FuturesTrade $trade, array $signal, float $currentPrice): void
     {
+        // Log current position status
+        $unrealizedPnL = $trade->calculateUnrealizedPnL($currentPrice);
+        $pnlPercentage = $trade->calculatePnLPercentage();
+        
+        $this->logger->info("📊 [POSITION] Monitoring existing {$trade->side} position:");
+        $this->logger->info("   Entry Price: {$trade->entry_price}");
+        $this->logger->info("   Current Price: {$currentPrice}");
+        $this->logger->info("   Stop Loss: {$trade->stop_loss}");
+        $this->logger->info("   Take Profit: {$trade->take_profit}");
+        $this->logger->info("   Unrealized PnL: {$unrealizedPnL}");
+        $this->logger->info("   PnL %: {$pnlPercentage}%");
+        
         // Check if we should close the position
         $shouldClose = $this->shouldClosePosition($trade, $signal, $currentPrice);
         
         if ($shouldClose) {
+            $this->logger->info("🔴 [CLOSE] Position closing conditions met - closing position");
             $this->closePosition($trade, $currentPrice);
+        } else {
+            $this->logger->info("✅ [HOLD] Position conditions stable - continuing to monitor");
         }
     }
 
@@ -332,7 +355,10 @@ class FuturesTradingBotService
             return true;
         }
         
-        return $this->bot->position_side === $direction;
+        // Map signal direction to position side for comparison
+        $signalPositionSide = ($direction === 'bullish' || $direction === 'long') ? 'long' : 'short';
+        
+        return $this->bot->position_side === $signalPositionSide;
     }
 
     /**
@@ -545,7 +571,8 @@ class FuturesTradingBotService
     private function placeFuturesOrder(array $signal, float $positionSize): ?array
     {
         try {
-            $side = $signal['direction'] === 'long' ? 'buy' : 'sell';
+            // Map signal direction to order side
+            $side = ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') ? 'buy' : 'sell';
             
             $orderResult = $this->exchangeService->placeFuturesOrder(
                 $this->bot->symbol,
@@ -594,11 +621,14 @@ class FuturesTradingBotService
      */
     private function saveFuturesSignal(array $signal, float $currentPrice, float $stopLoss, float $takeProfit, float $riskRewardRatio): void
     {
+        // Map signal direction to database enum values
+        $direction = $signal['direction'] === 'bullish' ? 'long' : 'short';
+        
         FuturesSignal::create([
             'futures_trading_bot_id' => $this->bot->id,
             'symbol' => $this->bot->symbol,
             'timeframe' => $signal['timeframe'],
-            'direction' => $signal['direction'],
+            'direction' => $direction,
             'signal_type' => $signal['type'],
             'strength' => $signal['strength'] ?? 0,
             'price' => $currentPrice,
@@ -645,12 +675,8 @@ class FuturesTradingBotService
             return true;
         }
         
-        // Check for opposite signal
-        if ($signal['direction'] !== $trade->side && ($signal['strength'] ?? 0) > 0.7) {
-            $this->logger->info("Opposite signal detected, closing position");
-            return true;
-        }
-        
+        // Only close on stop loss or take profit - no opposite signal closing
+        // This prevents flip-flopping between positions
         return false;
     }
 
@@ -681,7 +707,11 @@ class FuturesTradingBotService
                     'closed_at' => now(),
                 ]);
                 
+                // Set cooldown period after closing position
+                $this->setCooldownPeriod();
+                
                 $this->logger->info("Position closed: PnL = {$realizedPnL}, PnL% = {$pnlPercentage}%");
+                $this->logger->info("⏰ [COOLDOWN] Cooldown period activated - no new positions for 30 minutes");
             }
         } catch (\Exception $e) {
             $this->logger->error("Failed to close position: " . $e->getMessage());
@@ -704,5 +734,31 @@ class FuturesTradingBotService
                 'pnl_percentage' => $pnlPercentage,
             ]);
         }
+    }
+
+    /**
+     * Set cooldown period after closing a position
+     */
+    private function setCooldownPeriod(): void
+    {
+        $this->bot->update([
+            'last_position_closed_at' => now(),
+        ]);
+    }
+
+    /**
+     * Check if bot is in cooldown period after closing a position
+     */
+    private function isInCooldownPeriod(): bool
+    {
+        if (!$this->bot->last_position_closed_at) {
+            return false;
+        }
+        
+        // 30 minutes cooldown period
+        $cooldownMinutes = 30;
+        $cooldownEnd = $this->bot->last_position_closed_at->addMinutes($cooldownMinutes);
+        
+        return now()->lt($cooldownEnd);
     }
 }
