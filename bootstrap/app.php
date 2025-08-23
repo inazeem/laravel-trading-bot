@@ -35,7 +35,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ->appendOutputTo(storage_path('logs/trading-bot-scheduler.log'));
 
         $schedule->command('futures:run --all')
-            ->everyMinutes()
+            ->everyMinute()
             ->withoutOverlapping()
             ->runInBackground()
             ->appendOutputTo(storage_path('logs/trading-bot-scheduler.log'));

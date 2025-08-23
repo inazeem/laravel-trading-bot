@@ -122,17 +122,16 @@ class TradingBotService
             $this->logger->info("🔍 [SIGNALS] Generating signals for {$timeframe} timeframe...");
             $signals = $this->smcService->generateSignals($currentPrice);
             
-            foreach ($signals as $signal) {
-                $signal['timeframe'] = $timeframe;
-                $allSignals[] = $signal;
-            }
-            
             $this->logger->info("📊 [SIGNALS] Generated " . count($signals) . " signals for {$timeframe} timeframe");
             
             // Log signal details
             foreach ($signals as $index => $signal) {
                 $price = $signal['price'] ?? $signal['level'] ?? 'N/A';
                 $this->logger->info("📋 [SIGNAL {$index}] Type: {$signal['type']}, Direction: {$signal['direction']}, Strength: {$signal['strength']}, Price: {$price}");
+                
+                // Add timeframe to signal
+                $signal['timeframe'] = $timeframe;
+                $allSignals[] = $signal;
             }
         }
         
@@ -146,20 +145,37 @@ class TradingBotService
     private function processSignals(array $signals, float $currentPrice): void
     {
         if (empty($signals)) {
-            Log::info("📭 [SIGNALS] No trading signals generated - no action needed");
+            $this->logger->info("📭 [SIGNALS] No trading signals generated - no action needed");
             return;
         }
         
-        Log::info("🔍 [FILTER] Filtering and ranking " . count($signals) . " signals...");
+        $this->logger->info("🔍 [FILTER] Filtering and ranking " . count($signals) . " signals...");
+        
+        // Log all signals before filtering
+        foreach ($signals as $index => $signal) {
+            $this->logger->info("🔍 [PRE-FILTER] Signal {$index}: Type={$signal['type']}, Direction={$signal['direction']}, Strength={$signal['strength']}, Timeframe={$signal['timeframe']}");
+        }
         
         // Filter and rank signals
         $filteredSignals = $this->filterSignals($signals);
         
-        Log::info("✅ [FILTER] " . count($filteredSignals) . " signals passed filtering criteria");
+        $this->logger->info("✅ [FILTER] " . count($filteredSignals) . " signals passed filtering criteria");
+        
+        // Log filtered signals
+        foreach ($filteredSignals as $index => $signal) {
+            $this->logger->info("✅ [FILTERED] Signal {$index}: Type={$signal['type']}, Direction={$signal['direction']}, Strength={$signal['strength']}, Normalized={$signal['normalized_strength']}, Timeframe={$signal['timeframe']}");
+        }
         
         foreach ($filteredSignals as $index => $signal) {
-            Log::info("🎯 [PROCESS] Processing signal " . ($index + 1) . " of " . count($filteredSignals));
+            $this->logger->info("🎯 [PROCESS] Processing signal " . ($index + 1) . " of " . count($filteredSignals));
             $this->processSignal($signal, $currentPrice);
+        }
+        
+        // If no signals passed filtering, save at least one signal for debugging
+        if (empty($filteredSignals) && !empty($signals)) {
+            $this->logger->info("🔧 [DEBUG] No signals passed filtering, saving first signal for debugging");
+            $debugSignal = $signals[0];
+            $this->saveSignal($debugSignal, $currentPrice, 0, 0, 0);
         }
     }
 
@@ -171,8 +187,20 @@ class TradingBotService
         $filtered = [];
         
         foreach ($signals as $signal) {
-            // Minimum strength threshold
-            if (($signal['strength'] ?? 0) < 0.5) {
+            $strength = $signal['strength'] ?? 0;
+            
+            // Handle different strength formats (normalized 0-1 or percentage 0-100)
+            $normalizedStrength = $strength;
+            if ($strength > 1 && $strength <= 100) {
+                // If strength is a percentage (0-100), normalize to 0-1
+                $normalizedStrength = $strength / 100;
+            } elseif ($strength > 100) {
+                // If strength is a very large number, use a minimum threshold
+                $normalizedStrength = 0.1; // Minimum threshold for very large values
+            }
+            
+            // Minimum strength threshold (0.1 = 10%)
+            if ($normalizedStrength < 0.1) {
                 continue;
             }
             
@@ -181,23 +209,25 @@ class TradingBotService
             
             // If only one timeframe is configured, accept signals with good strength
             if (count($this->bot->timeframes) === 1) {
-                if (($signal['strength'] ?? 0) >= 0.5) {
+                if ($normalizedStrength >= 0.1) {
                     $signal['confluence'] = 1; // Single timeframe confluence
+                    $signal['normalized_strength'] = $normalizedStrength;
                     $filtered[] = $signal;
                 }
             } else {
                 // Multiple timeframes: require confluence
                 if ($confluence >= 1) { // At least 1 other timeframe showing same signal
                     $signal['confluence'] = $confluence;
+                    $signal['normalized_strength'] = $normalizedStrength;
                     $filtered[] = $signal;
                 }
             }
         }
         
-        // Sort by confluence and strength
+        // Sort by confluence and normalized strength
         usort($filtered, function($a, $b) {
-            $scoreA = ($a['confluence'] * 10) + ($a['strength'] ?? 0);
-            $scoreB = ($b['confluence'] * 10) + ($b['strength'] ?? 0);
+            $scoreA = ($a['confluence'] * 10) + ($a['normalized_strength'] ?? 0);
+            $scoreB = ($b['confluence'] * 10) + ($b['normalized_strength'] ?? 0);
             return $scoreB <=> $scoreA;
         });
         
