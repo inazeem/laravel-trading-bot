@@ -168,15 +168,21 @@
             <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                 <div class="border-b border-gray-200">
                     <nav class="-mb-px flex space-x-8 px-6">
-                                    <a href="#trades" class="border-b-2 border-blue-500 py-4 px-1 text-sm font-medium text-blue-600">
-                Recent Trades
-            </a>
-            <a href="#signals" class="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
-                Recent Signals
-            </a>
-            <a href="{{ route('futures-bots.logs', $futuresBot) }}" class="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
-                View Logs
-            </a>
+                        <a href="#trades" class="tab-link border-b-2 border-blue-500 py-4 px-1 text-sm font-medium text-blue-600" data-tab="trades">
+                            Recent Trades
+                        </a>
+                        <a href="#signals" class="tab-link border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300" data-tab="signals">
+                            Recent Signals
+                        </a>
+                        <a href="{{ route('futures-bots.trades', $futuresBot) }}" class="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                            All Trades
+                        </a>
+                        <a href="{{ route('futures-bots.signals', $futuresBot) }}" class="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                            All Signals
+                        </a>
+                        <a href="{{ route('futures-bots.logs', $futuresBot) }}" class="border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700 hover:border-gray-300">
+                            View Logs
+                        </a>
                     </nav>
                 </div>
 
@@ -237,7 +243,7 @@
                     </div>
 
                     <!-- Recent Signals -->
-                    <div id="signals" class="hidden">
+                    <div id="signals" class="hidden" style="display: none;">
                         <h3 class="text-lg font-semibold text-gray-900 mb-4">Recent Signals</h3>
                         @if($recentSignals->count() > 0)
                             <div class="overflow-x-auto">
@@ -290,17 +296,34 @@
     </div>
 
     <script>
-        // Simple tab switching
+        // Enhanced tab switching with better error handling
         document.addEventListener('DOMContentLoaded', function() {
-            const tabs = document.querySelectorAll('nav a');
+            const tabLinks = document.querySelectorAll('.tab-link');
             const sections = document.querySelectorAll('#trades, #signals');
 
-            tabs.forEach(tab => {
+            console.log('Futures bot detail page loaded');
+            console.log('Found tab links:', tabLinks.length);
+            console.log('Found sections:', sections.length);
+
+            // Fallback: if no JavaScript, show all sections
+            if (tabLinks.length === 0) {
+                console.log('No tab links found, showing all sections');
+                sections.forEach(section => {
+                    section.classList.remove('hidden');
+                    section.style.display = 'block';
+                });
+                return;
+            }
+
+            tabLinks.forEach(tab => {
                 tab.addEventListener('click', function(e) {
                     e.preventDefault();
                     
-                    // Remove active classes
-                    tabs.forEach(t => {
+                    const targetTab = this.getAttribute('data-tab');
+                    console.log('Tab clicked:', targetTab);
+                    
+                    // Remove active classes from all tab links
+                    tabLinks.forEach(t => {
                         t.classList.remove('border-blue-500', 'text-blue-600');
                         t.classList.add('border-transparent', 'text-gray-500');
                     });
@@ -310,16 +333,35 @@
                     this.classList.add('border-blue-500', 'text-blue-600');
                     
                     // Show/hide sections
-                    const targetId = this.getAttribute('href').substring(1);
                     sections.forEach(section => {
-                        if (section.id === targetId) {
+                        if (section.id === targetTab) {
                             section.classList.remove('hidden');
+                            section.style.display = 'block';
+                            console.log('Showing section:', section.id);
                         } else {
                             section.classList.add('hidden');
+                            section.style.display = 'none';
+                            console.log('Hiding section:', section.id);
                         }
                     });
                 });
             });
+
+            // Initialize: show trades tab by default
+            const tradesSection = document.getElementById('trades');
+            const signalsSection = document.getElementById('signals');
+            
+            if (tradesSection) {
+                tradesSection.classList.remove('hidden');
+                tradesSection.style.display = 'block';
+                console.log('Initialized: showing trades section');
+            }
+            
+            if (signalsSection) {
+                signalsSection.classList.add('hidden');
+                signalsSection.style.display = 'none';
+                console.log('Initialized: hiding signals section');
+            }
         });
     </script>
 </x-app-layout>

@@ -196,6 +196,7 @@ class SmartMoneyConceptsService
 
     /**
      * Calculate order block strength
+     * Returns a normalized value between 0 and 1
      */
     private function calculateOrderBlockStrength(int $startIndex, int $endIndex): float
     {
@@ -207,7 +208,16 @@ class SmartMoneyConceptsService
             $priceRange += $this->candles[$i]['high'] - $this->candles[$i]['low'];
         }
         
-        return $volume * $priceRange;
+        // Normalize the strength to be between 0 and 1
+        $rawStrength = $volume * $priceRange;
+        
+        // Use a logarithmic scale to normalize large values
+        if ($rawStrength > 0) {
+            $normalizedStrength = log10($rawStrength + 1) / 10; // Normalize to 0-1 range
+            return min(1.0, max(0.0, $normalizedStrength)); // Ensure it's between 0 and 1
+        }
+        
+        return 0.0;
     }
 
     /**
@@ -221,11 +231,12 @@ class SmartMoneyConceptsService
         // Bullish BOS
         foreach ($recentSwingHighs as $swing) {
             if ($currentPrice > $swing['price']) {
+                $strength = ($currentPrice - $swing['price']) / $swing['price'];
                 return [
                     'type' => 'BOS',
                     'direction' => 'bullish',
                     'level' => $swing['price'],
-                    'strength' => ($currentPrice - $swing['price']) / $swing['price'] * 100
+                    'strength' => min(1.0, max(0.0, $strength)) // Normalize to 0-1
                 ];
             }
         }
@@ -233,11 +244,12 @@ class SmartMoneyConceptsService
         // Bearish BOS
         foreach ($recentSwingLows as $swing) {
             if ($currentPrice < $swing['price']) {
+                $strength = ($swing['price'] - $currentPrice) / $swing['price'];
                 return [
                     'type' => 'BOS',
                     'direction' => 'bearish',
                     'level' => $swing['price'],
-                    'strength' => ($swing['price'] - $currentPrice) / $swing['price'] * 100
+                    'strength' => min(1.0, max(0.0, $strength)) // Normalize to 0-1
                 ];
             }
         }
@@ -259,23 +271,25 @@ class SmartMoneyConceptsService
         
         // Bullish CHoCH (price breaks above last swing high after breaking below last swing low)
         if ($currentPrice > $lastSwingHigh['price'] && $currentPrice > $lastSwingLow['price']) {
+            $strength = ($currentPrice - $lastSwingHigh['price']) / $lastSwingHigh['price'];
             return [
                 'type' => 'CHoCH',
                 'direction' => 'bullish',
                 'support_level' => $lastSwingLow['price'],
                 'resistance_level' => $lastSwingHigh['price'],
-                'strength' => ($currentPrice - $lastSwingHigh['price']) / $lastSwingHigh['price'] * 100
+                'strength' => min(1.0, max(0.0, $strength)) // Normalize to 0-1
             ];
         }
         
         // Bearish CHoCH (price breaks below last swing low after breaking above last swing high)
         if ($currentPrice < $lastSwingLow['price'] && $currentPrice < $lastSwingHigh['price']) {
+            $strength = ($lastSwingLow['price'] - $currentPrice) / $lastSwingLow['price'];
             return [
                 'type' => 'CHoCH',
                 'direction' => 'bearish',
                 'support_level' => $lastSwingLow['price'],
                 'resistance_level' => $lastSwingHigh['price'],
-                'strength' => ($lastSwingLow['price'] - $currentPrice) / $lastSwingLow['price'] * 100
+                'strength' => min(1.0, max(0.0, $strength)) // Normalize to 0-1
             ];
         }
         
