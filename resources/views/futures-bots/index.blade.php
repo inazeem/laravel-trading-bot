@@ -101,6 +101,11 @@
                             </div>
                         </div>
 
+                        <!-- Trade Countdown Timer -->
+                        @if($bot->currentOpenTrade)
+                            <x-bot-card-countdown :trade="$bot->currentOpenTrade" />
+                        @endif
+
                         <div class="flex flex-wrap gap-2 mb-4">
                             @foreach($bot->timeframes as $timeframe)
                                 <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-800">
@@ -168,4 +173,55 @@
             @endif
         </div>
     </div>
+
+    <script>
+        // Real-time countdown timers for bot cards
+        document.addEventListener('DOMContentLoaded', function() {
+            const countdownElements = document.querySelectorAll('[data-countdown]');
+            
+            countdownElements.forEach(function(element) {
+                const tradeOpenedAt = new Date(element.dataset.tradeOpenedAt);
+                const maxDurationHours = parseInt(element.dataset.maxDurationHours) || 2;
+                
+                // Calculate when the trade should close
+                const tradeShouldCloseAt = new Date(tradeOpenedAt.getTime() + (maxDurationHours * 60 * 60 * 1000));
+
+                function updateCountdown() {
+                    const now = new Date();
+                    const remaining = tradeShouldCloseAt - now;
+
+                    if (remaining <= 0) {
+                        element.textContent = '00:00';
+                        element.classList.remove('text-green-600', 'text-orange-600');
+                        element.classList.add('text-red-600');
+                        return;
+                    }
+
+                    const hours = Math.floor(remaining / (1000 * 60 * 60));
+                    const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+
+                    element.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+
+                    // Update color based on time remaining
+                    const timeLeftMinutes = remaining / (1000 * 60);
+                    const parentContainer = element.closest('.inline-flex');
+                    
+                    if (timeLeftMinutes <= 30) {
+                        parentContainer.classList.remove('text-green-600', 'bg-green-100', 'border-green-300', 'text-orange-600', 'bg-orange-100', 'border-orange-300');
+                        parentContainer.classList.add('text-red-600', 'bg-red-100', 'border-red-300', 'animate-pulse');
+                    } else if (timeLeftMinutes <= 60) {
+                        parentContainer.classList.remove('text-green-600', 'bg-green-100', 'border-green-300', 'text-red-600', 'bg-red-100', 'border-red-300', 'animate-pulse');
+                        parentContainer.classList.add('text-orange-600', 'bg-orange-100', 'border-orange-300');
+                    } else {
+                        parentContainer.classList.remove('text-orange-600', 'bg-orange-100', 'border-orange-300', 'text-red-600', 'bg-red-100', 'border-red-300', 'animate-pulse');
+                        parentContainer.classList.add('text-green-600', 'bg-green-100', 'border-green-300');
+                    }
+                }
+
+                // Update immediately and then every second
+                updateCountdown();
+                setInterval(updateCountdown, 1000);
+            });
+        });
+    </script>
 </x-app-layout>

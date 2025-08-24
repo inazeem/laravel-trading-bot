@@ -18,6 +18,13 @@ class FuturesTradingBotController extends Controller
             ->orderBy('created_at', 'desc')
             ->get();
 
+        // Load current open trade for each bot
+        foreach ($bots as $bot) {
+            $bot->currentOpenTrade = $bot->openTrades()
+                ->orderBy('opened_at', 'desc')
+                ->first();
+        }
+
         return view('futures-bots.index', compact('bots'));
     }
 
@@ -105,6 +112,11 @@ class FuturesTradingBotController extends Controller
             ->limit(10)
             ->get();
 
+        // Get current open trade for countdown timer
+        $currentOpenTrade = $futuresBot->openTrades()
+            ->orderBy('opened_at', 'desc')
+            ->first();
+
         $stats = [
             'total_trades' => $futuresBot->trades()->count(),
             'open_trades' => $futuresBot->openTrades()->count(),
@@ -114,7 +126,7 @@ class FuturesTradingBotController extends Controller
             'win_rate' => $futuresBot->win_rate,
         ];
 
-        return view('futures-bots.show', compact('futuresBot', 'recentTrades', 'recentSignals', 'stats'));
+        return view('futures-bots.show', compact('futuresBot', 'recentTrades', 'recentSignals', 'stats', 'currentOpenTrade'));
     }
 
     public function edit(FuturesTradingBot $futuresBot)

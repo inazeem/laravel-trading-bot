@@ -11,9 +11,7 @@ use App\Http\Controllers\FuturesTradingBotController;
 use App\Http\Controllers\ApiKeyController;
 use App\Http\Controllers\AssetController;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+Route::get('/', [App\Http\Controllers\HomeController::class, 'index'])->name('home');
 
 Route::get('/dashboard', function () {
     return view('dashboard');
