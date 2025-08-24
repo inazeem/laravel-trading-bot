@@ -104,9 +104,10 @@ class TradingBotService
             
             $this->logger->info("⏰ [TIMEFRAME] Processing {$timeframe} timeframe (interval: {$interval})...");
             
-            // Get candlestick data
-            $this->logger->info("📈 [CANDLES] Fetching 500 candlesticks for {$this->bot->symbol} on {$timeframe}...");
-            $candles = $this->exchangeService->getCandles($this->bot->symbol, $interval, 500);
+            // Get candlestick data - optimized for micro trading
+            $candleLimit = $this->getOptimalCandleLimit($timeframe);
+            $this->logger->info("📈 [CANDLES] Fetching {$candleLimit} candlesticks for {$this->bot->symbol} on {$timeframe}...");
+            $candles = $this->exchangeService->getCandles($this->bot->symbol, $interval, $candleLimit);
             if (empty($candles)) {
                 $this->logger->warning("⚠️ [CANDLES] No candle data received for {$timeframe} timeframe");
                 continue;
@@ -140,6 +141,17 @@ class TradingBotService
     }
 
     /**
+     * Get optimal candle limit based on timeframe for micro trading
+     */
+    private function getOptimalCandleLimit(string $timeframe): int
+    {
+        // Use configuration for micro trading optimization
+        $limits = config('micro_trading.candle_limits', []);
+        
+        return $limits[$timeframe] ?? 100; // Default fallback
+    }
+
+    /**
      * Process trading signals
      */
     private function processSignals(array $signals, float $currentPrice): void
@@ -166,9 +178,23 @@ class TradingBotService
             $this->logger->info("✅ [FILTERED] Signal {$index}: Type={$signal['type']}, Direction={$signal['direction']}, Strength={$signal['strength']}, Normalized={$signal['normalized_strength']}, Timeframe={$signal['timeframe']}");
         }
         
-        foreach ($filteredSignals as $index => $signal) {
-            $this->logger->info("🎯 [PROCESS] Processing signal " . ($index + 1) . " of " . count($filteredSignals));
-            $this->processSignal($signal, $currentPrice);
+        // Group signals by direction and process only the strongest signal in each direction
+        $bullishSignals = array_filter($filteredSignals, fn($s) => $s['direction'] === 'bullish');
+        $bearishSignals = array_filter($filteredSignals, fn($s) => $s['direction'] === 'bearish');
+        
+        $this->logger->info("📊 [SIGNALS] Found " . count($bullishSignals) . " bullish and " . count($bearishSignals) . " bearish signals");
+        
+        // Process only the strongest signal in each direction
+        if (!empty($bullishSignals)) {
+            $strongestBullish = $this->getStrongestSignal($bullishSignals);
+            $this->logger->info("🎯 [PROCESS] Processing strongest bullish signal");
+            $this->processSignal($strongestBullish, $currentPrice);
+        }
+        
+        if (!empty($bearishSignals)) {
+            $strongestBearish = $this->getStrongestSignal($bearishSignals);
+            $this->logger->info("🎯 [PROCESS] Processing strongest bearish signal");
+            $this->processSignal($strongestBearish, $currentPrice);
         }
         
         // If no signals passed filtering, save at least one signal for debugging
@@ -199,8 +225,8 @@ class TradingBotService
                 $normalizedStrength = 0.1; // Minimum threshold for very large values
             }
             
-            // Minimum strength threshold (0.1 = 10%)
-            if ($normalizedStrength < 0.1) {
+            // Lower minimum strength threshold (0.05 = 5%) to allow more signals through
+            if ($normalizedStrength < 0.05) {
                 continue;
             }
             
@@ -209,14 +235,14 @@ class TradingBotService
             
             // If only one timeframe is configured, accept signals with good strength
             if (count($this->bot->timeframes) === 1) {
-                if ($normalizedStrength >= 0.1) {
+                if ($normalizedStrength >= 0.05) {
                     $signal['confluence'] = 1; // Single timeframe confluence
                     $signal['normalized_strength'] = $normalizedStrength;
                     $filtered[] = $signal;
                 }
             } else {
-                // Multiple timeframes: require confluence
-                if ($confluence >= 1) { // At least 1 other timeframe showing same signal
+                // Multiple timeframes: require confluence OR accept strong single timeframe signals
+                if ($confluence >= 1 || $normalizedStrength >= 0.3) { // At least 1 other timeframe OR strong single signal
                     $signal['confluence'] = $confluence;
                     $signal['normalized_strength'] = $normalizedStrength;
                     $filtered[] = $signal;
@@ -272,24 +298,34 @@ class TradingBotService
      */
     private function handleNewSignal(array $signal, float $currentPrice): void
     {
+        Log::info("🎯 [SIGNAL] Processing new signal: Type={$signal['type']}, Direction={$signal['direction']}, Price={$currentPrice}");
+        
         // Calculate position size
         $positionSize = $this->calculatePositionSize($currentPrice);
         
         if ($positionSize <= 0) {
-            Log::warning("Insufficient balance for trade - Position size calculated as: {$positionSize}");
+            Log::warning("❌ [SIGNAL] Insufficient balance for trade - Position size calculated as: {$positionSize}");
             return;
         }
+        
+        Log::info("✅ [SIGNAL] Position size calculated: {$positionSize}");
         
         // Calculate stop loss and take profit
         $stopLoss = $this->calculateStopLoss($signal, $currentPrice);
         $takeProfit = $this->calculateTakeProfit($signal, $currentPrice);
         
+        Log::info("📊 [SIGNAL] Stop Loss: {$stopLoss}, Take Profit: {$takeProfit}");
+        
         // Validate risk/reward ratio
         $riskRewardRatio = $this->calculateRiskRewardRatio($currentPrice, $stopLoss, $takeProfit);
+        Log::info("📈 [SIGNAL] Risk/Reward Ratio: {$riskRewardRatio}");
+        
         if ($riskRewardRatio < 1.5) {
-            Log::info("Risk/reward ratio too low: {$riskRewardRatio}");
+            Log::info("❌ [SIGNAL] Risk/reward ratio too low: {$riskRewardRatio} (minimum: 1.5)");
             return;
         }
+        
+        Log::info("✅ [SIGNAL] Risk/reward ratio acceptable, placing order...");
         
         // Place the order
         $order = $this->placeOrder($signal, $positionSize);
@@ -301,7 +337,9 @@ class TradingBotService
             // Save signal
             $this->saveSignal($signal, $currentPrice, $stopLoss, $takeProfit, $riskRewardRatio);
             
-            Log::info("Order placed successfully: {$order['order_id']}");
+            Log::info("✅ [SIGNAL] Order placed successfully: {$order['order_id']}");
+        } else {
+            Log::error("❌ [SIGNAL] Failed to place order");
         }
     }
 
@@ -327,8 +365,12 @@ class TradingBotService
         $usdtBalance = 0;
         
         foreach ($balance as $bal) {
-            if ($bal['currency'] === 'USDT') {
-                $usdtBalance = $bal['available'];
+            // Handle both Binance (asset) and KuCoin (currency) formats
+            $currency = $bal['currency'] ?? $bal['asset'] ?? null;
+            $available = $bal['available'] ?? $bal['free'] ?? 0;
+            
+            if ($currency === 'USDT' && $available > 0) {
+                $usdtBalance = (float) $available;
                 break;
             }
         }

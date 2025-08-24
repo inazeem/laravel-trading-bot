@@ -164,6 +164,11 @@
                 </div>
             </div>
 
+            <!-- Trade Countdown Timer -->
+            @if($currentOpenTrade)
+                <x-trade-countdown :trade="$currentOpenTrade" />
+            @endif
+
             <!-- Recent Activity Tabs -->
             <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                 <div class="border-b border-gray-200">
@@ -361,6 +366,50 @@
                 signalsSection.classList.add('hidden');
                 signalsSection.style.display = 'none';
                 console.log('Initialized: hiding signals section');
+            }
+
+            // Real-time countdown timer
+            const countdownElement = document.querySelector('[data-countdown]');
+            if (countdownElement) {
+                const tradeOpenedAt = new Date(countdownElement.dataset.tradeOpenedAt);
+                const maxDurationHours = parseInt(countdownElement.dataset.maxDurationHours) || 2;
+                
+                // Calculate when the trade should close
+                const tradeShouldCloseAt = new Date(tradeOpenedAt.getTime() + (maxDurationHours * 60 * 60 * 1000));
+
+                function updateCountdown() {
+                    const now = new Date();
+                    const remaining = tradeShouldCloseAt - now;
+
+                    if (remaining <= 0) {
+                        countdownElement.textContent = '00:00';
+                        countdownElement.classList.add('text-red-600', 'animate-pulse');
+                        return;
+                    }
+
+                    const hours = Math.floor(remaining / (1000 * 60 * 60));
+                    const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+
+                    countdownElement.textContent = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+                    // Update color based on time remaining
+                    const timeLeftMinutes = remaining / (1000 * 60);
+                    if (timeLeftMinutes <= 30) {
+                        countdownElement.classList.remove('text-green-600', 'text-orange-600');
+                        countdownElement.classList.add('text-red-600', 'animate-pulse');
+                    } else if (timeLeftMinutes <= 60) {
+                        countdownElement.classList.remove('text-green-600', 'text-red-600', 'animate-pulse');
+                        countdownElement.classList.add('text-orange-600');
+                    } else {
+                        countdownElement.classList.remove('text-orange-600', 'text-red-600', 'animate-pulse');
+                        countdownElement.classList.add('text-green-600');
+                    }
+                }
+
+                // Update immediately and then every second
+                updateCountdown();
+                setInterval(updateCountdown, 1000);
             }
         });
     </script>

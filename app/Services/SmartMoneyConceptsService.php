@@ -48,7 +48,9 @@ class SmartMoneyConceptsService
      */
     private function identifySwingPoints(): void
     {
-        $length = 5; // Swing detection length
+        // For micro trading, use shorter swing detection length
+        // This makes the analysis more sensitive to recent price movements
+        $length = config('micro_trading.trend_analysis.swing_detection_length', 3);
         
         for ($i = $length; $i < count($this->candles) - $length; $i++) {
             $candle = $this->candles[$i];
@@ -344,6 +346,63 @@ class SmartMoneyConceptsService
     }
 
     /**
+     * Calculate signal quality score based on multiple factors
+     */
+    private function calculateSignalScore(array $block, array $trend, float $currentPrice): float
+    {
+        $score = $block['strength']; // Base score from order block strength
+        
+        // Factor 1: Trend alignment (boost if aligned, slight penalty if against)
+        $trendAlignment = ($trend['direction'] === $block['type']) ? 1.2 : 0.9;
+        $score *= $trendAlignment;
+        
+        // Factor 2: Trend strength (stronger trends give more weight to alignment)
+        $trendWeight = 1 + ($trend['strength'] * 0.5); // Max 1.5x boost for very strong trends
+        if ($trend['direction'] === $block['type']) {
+            $score *= $trendWeight;
+        }
+        
+        // Factor 3: Price proximity to order block (closer = better signal)
+        $blockMid = ($block['high'] + $block['low']) / 2;
+        $priceDistance = abs($currentPrice - $blockMid) / $blockMid;
+        $proximityBonus = max(0.8, 1.2 - ($priceDistance * 2)); // Closer blocks get higher scores
+        $score *= $proximityBonus;
+        
+        // Factor 4: Order block size (larger blocks = stronger levels)
+        $blockSize = ($block['high'] - $block['low']) / $block['low'];
+        $sizeBonus = 1 + min(0.3, $blockSize * 10); // Max 30% bonus for large blocks
+        $score *= $sizeBonus;
+        
+        return min(1.0, $score); // Cap at 1.0
+    }
+    
+    /**
+     * Analyze market trend
+     */
+    private function analyzeMarketTrend(): array
+    {
+        // For micro trading, use fewer candles for trend analysis
+        // This makes the analysis more responsive to recent price action
+        $candleCount = min(config('micro_trading.trend_analysis.candles_for_trend', 10), count($this->candles));
+        $recentCandles = array_slice($this->candles, -$candleCount);
+        $firstPrice = $recentCandles[0]['close'];
+        $lastPrice = end($recentCandles)['close'];
+        
+        $change = (($lastPrice - $firstPrice) / $firstPrice) * 100;
+        $direction = $change > 0 ? 'bullish' : ($change < 0 ? 'bearish' : 'neutral');
+        $strength = abs($change) / 10; // Normalize to 0-1 (10% = 1.0 strength)
+        
+        return [
+            'direction' => $direction,
+            'strength' => min(1.0, $strength),
+            'change_percent' => $change,
+            'first_price' => $firstPrice,
+            'last_price' => $lastPrice,
+            'candles_analyzed' => $candleCount
+        ];
+    }
+    
+    /**
      * Get order blocks near current price
      */
     public function getNearbyOrderBlocks(float $currentPrice, float $threshold = 0.02): array
@@ -363,6 +422,10 @@ class SmartMoneyConceptsService
         $signals = [];
         
         \Log::info("🔍 [SIGNALS] Generating signals for current price: $currentPrice");
+        
+        // Analyze market trend first
+        $trend = $this->analyzeMarketTrend();
+        \Log::info("📈 [TREND] Market trend: " . json_encode($trend));
         
         // Check for BOS
         \Log::info("🔍 [SIGNALS] Checking for Break of Structure (BOS)...");
@@ -390,21 +453,81 @@ class SmartMoneyConceptsService
         \Log::info("📦 [SIGNALS] Found " . count($nearbyBlocks) . " nearby order blocks");
         
         foreach ($nearbyBlocks as $block) {
-            if ($block['type'] === 'bullish' && $currentPrice > $block['high']) {
+            // Consider market trend when generating signals
+            $trend = $this->analyzeMarketTrend();
+            $trendStrength = $trend['strength'];
+            $trendDirection = $trend['direction'];
+            
+            // Calculate signal quality score based on multiple factors
+            $signalScore = $this->calculateSignalScore($block, $trend, $currentPrice);
+            
+            \Log::info("📊 [SIGNAL] Block type: {$block['type']}, Trend: {$trendDirection}, Signal Score: {$signalScore}");
+            // Only generate signals above minimum quality threshold
+            if ($signalScore < 0.3) {
+                \Log::info("🚫 [SIGNAL] Signal quality too low: {$signalScore} (minimum: 0.3)");
+                continue;
+            }
+            
+            // For bullish order blocks: price at support level (below low) = bullish signal
+            if ($block['type'] === 'bullish' && $currentPrice <= $block['low']) {
+                $signal = [
+                    'type' => 'OrderBlock_Support',
+                    'direction' => 'bullish',
+                    'level' => $block['low'],
+                    'strength' => $signalScore,
+                    'quality_factors' => [
+                        'trend_alignment' => $trend['direction'] === $block['type'],
+                        'trend_strength' => $trend['strength'],
+                        'block_strength' => $block['strength']
+                    ]
+                ];
+                $signals[] = $signal;
+                \Log::info("✅ [SIGNALS] Bullish Order Block support: " . json_encode($signal));
+            }
+            // For bearish order blocks: price at resistance level (above high) = bearish signal
+            elseif ($block['type'] === 'bearish' && $currentPrice >= $block['high']) {
+                $signal = [
+                    'type' => 'OrderBlock_Resistance',
+                    'direction' => 'bearish',
+                    'level' => $block['high'],
+                    'strength' => $signalScore,
+                    'quality_factors' => [
+                        'trend_alignment' => $trend['direction'] === $block['type'],
+                        'trend_strength' => $trend['strength'],
+                        'block_strength' => $block['strength']
+                    ]
+                ];
+                $signals[] = $signal;
+                \Log::info("✅ [SIGNALS] Bearish Order Block resistance: " . json_encode($signal));
+            }
+            // For bullish order blocks: price breaking above high = bullish breakout
+            elseif ($block['type'] === 'bullish' && $currentPrice > $block['high']) {
                 $signal = [
                     'type' => 'OrderBlock_Breakout',
                     'direction' => 'bullish',
                     'level' => $block['high'],
-                    'strength' => $block['strength']
+                    'strength' => $signalScore,
+                    'quality_factors' => [
+                        'trend_alignment' => $trend['direction'] === $block['type'],
+                        'trend_strength' => $trend['strength'],
+                        'block_strength' => $block['strength']
+                    ]
                 ];
                 $signals[] = $signal;
                 \Log::info("✅ [SIGNALS] Bullish Order Block breakout: " . json_encode($signal));
-            } elseif ($block['type'] === 'bearish' && $currentPrice < $block['low']) {
+            }
+            // For bearish order blocks: price breaking below low = bearish breakout
+            elseif ($block['type'] === 'bearish' && $currentPrice < $block['low']) {
                 $signal = [
                     'type' => 'OrderBlock_Breakout',
                     'direction' => 'bearish',
                     'level' => $block['low'],
-                    'strength' => $block['strength']
+                    'strength' => $signalScore,
+                    'quality_factors' => [
+                        'trend_alignment' => $trend['direction'] === $block['type'],
+                        'trend_strength' => $trend['strength'],
+                        'block_strength' => $block['strength']
+                    ]
                 ];
                 $signals[] = $signal;
                 \Log::info("✅ [SIGNALS] Bearish Order Block breakout: " . json_encode($signal));

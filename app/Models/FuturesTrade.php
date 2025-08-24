@@ -24,6 +24,8 @@ class FuturesTrade extends Model
         'pnl_percentage',
         'status',
         'order_id',
+        'stop_loss_order_id',
+        'take_profit_order_id',
         'exchange_response',
         'opened_at',
         'closed_at'

@@ -27,6 +27,7 @@ return new class extends Migration
             $table->enum('position_side', ['long', 'short', 'both'])->default('both');
             $table->decimal('stop_loss_percentage', 5, 2)->default(2);
             $table->decimal('take_profit_percentage', 5, 2)->default(4);
+            $table->boolean('enable_bitcoin_correlation')->default(false);
 
             $table->json('strategy_settings')->nullable();
             $table->timestamp('last_run_at')->nullable();
