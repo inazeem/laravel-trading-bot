@@ -15,6 +15,17 @@ class BitcoinCorrelationService
     }
     
     /**
+     * Get optimal candle limit based on timeframe for micro trading
+     */
+    private function getOptimalCandleLimit(string $timeframe): int
+    {
+        // Use configuration for micro trading optimization
+        $limits = config('micro_trading.candle_limits', []);
+        
+        return $limits[$timeframe] ?? 100; // Default fallback
+    }
+
+    /**
      * Check if Bitcoin signals align with the asset signal
      * Returns true if signals are aligned, false if they conflict
      */
@@ -28,8 +39,9 @@ class BitcoinCorrelationService
                 return false;
             }
             
-            // Get Bitcoin candlestick data for the same timeframe
-            $btcCandles = $this->exchangeService->getCandles('BTC-USDT', $timeframe, 500);
+            // Get Bitcoin candlestick data for the same timeframe - optimized for micro trading
+            $candleLimit = $this->getOptimalCandleLimit($timeframe);
+            $btcCandles = $this->exchangeService->getCandles('BTC-USDT', $timeframe, $candleLimit);
             if (empty($btcCandles)) {
                 Log::warning("⚠️ [BTC CORRELATION] Failed to get Bitcoin candlestick data");
                 return false;

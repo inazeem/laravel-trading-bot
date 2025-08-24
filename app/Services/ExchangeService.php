@@ -159,16 +159,18 @@ class ExchangeService
     }
 
     /**
-     * Place futures order
+     * Place futures order - MARKET ORDER ONLY
      */
-    public function placeFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss = null, $takeProfit = null, $orderType = 'limit', $limitBuffer = 0.001)
+    public function placeFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss = null, $takeProfit = null, $orderType = 'market', $limitBuffer = 0)
     {
         try {
+            Log::info("Placing futures market order: {$side} {$symbol} Qty: {$quantity}");
+            
             switch ($this->exchange) {
                 case 'kucoin':
                     return $this->placeKuCoinFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss, $takeProfit);
-                            case 'binance':
-                return $this->placeBinanceFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss, $takeProfit, $orderType, $limitBuffer);
+                case 'binance':
+                    return $this->placeBinanceFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss, $takeProfit, 'market', 0);
                 default:
                     throw new \Exception("Unsupported exchange: {$this->exchange}");
             }
@@ -763,42 +765,29 @@ class ExchangeService
     }
 
     /**
-     * Place Binance futures order with built-in stop loss and take profit
+     * Place Binance futures order - MARKET ORDER ONLY
      */
-    private function placeBinanceFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss = null, $takeProfit = null, $orderType = 'limit', $limitBuffer = 0.001)
+    private function placeBinanceFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss = null, $takeProfit = null, $orderType = 'market', $limitBuffer = 0)
     {
-        // Get server time from Binance to ensure timestamp accuracy
-        $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
-        if ($serverTimeResponse->successful()) {
-            $serverTime = $serverTimeResponse->json()['serverTime'];
-            $timestamp = $serverTime;
-        } else {
-            $timestamp = round(microtime(true) * 1000);
-        }
-        
-        $endpoint = '/fapi/v1/order';
-        
-        // Normalize symbol for Binance (remove dash)
-        $binanceSymbol = str_replace('-', '', $symbol);
-        
-        // Get appropriate precision for this symbol
-        $precision = $this->getFuturesQuantityPrecision($binanceSymbol);
-        
-        // Calculate order price based on order type
-        if ($orderType === 'limit') {
-            $orderPrice = $this->calculateLimitPrice($binanceSymbol, $side, $limitBuffer);
+        try {
+            // Get server time from Binance to ensure timestamp accuracy
+            $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
+            if ($serverTimeResponse->successful()) {
+                $serverTime = $serverTimeResponse->json()['serverTime'];
+                $timestamp = $serverTime;
+            } else {
+                $timestamp = round(microtime(true) * 1000);
+            }
             
-            $orderParams = [
-                'symbol' => $binanceSymbol,
-                'side' => strtoupper($side),
-                'type' => 'LIMIT',
-                'timeInForce' => 'GTC',
-                'quantity' => round($quantity, $precision),
-                'price' => round($orderPrice, 4),
-                'timestamp' => (int)$timestamp
-            ];
-        } else {
-            // Market order
+            $endpoint = '/fapi/v1/order';
+            
+            // Normalize symbol for Binance (remove dash)
+            $binanceSymbol = str_replace('-', '', $symbol);
+            
+            // Get appropriate precision for this symbol
+            $precision = $this->getFuturesQuantityPrecision($binanceSymbol);
+            
+            // MARKET ORDER ONLY - simplified logic
             $orderParams = [
                 'symbol' => $binanceSymbol,
                 'side' => strtoupper($side),
@@ -806,62 +795,148 @@ class ExchangeService
                 'quantity' => round($quantity, $precision),
                 'timestamp' => (int)$timestamp
             ];
-        }
-        
-        $queryString = http_build_query($orderParams);
-        $signature = hash_hmac('sha256', $queryString, $this->secretKey);
-        $orderParams['signature'] = $signature;
-        
-        Log::info("Placing Binance futures order with SL/TP: " . json_encode($orderParams));
-        
-        $response = Http::withHeaders([
-            'X-MBX-APIKEY' => $this->apiKey
-        ])->asForm()->post('https://fapi.binance.com' . $endpoint, $orderParams);
-        
-        Log::info("Binance futures order response: " . $response->body());
-        
-        if ($response->successful()) {
-            $data = $response->json();
-            $mainOrderId = $data['orderId'];
             
-            // For now, just return the main order with SL/TP prices
-            // We'll implement proper SL/TP order placement in a separate method
-            // that can be called after the main order is filled
+            $queryString = http_build_query($orderParams);
+            $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+            $orderParams['signature'] = $signature;
             
-                        return [
-                'order_id' => $mainOrderId,
-                'symbol' => $symbol,
-                'side' => $side,
-                'quantity' => $quantity,
-                'price' => $data['avgPrice'] ?? 0,
-                'status' => $data['status'],
-                'stop_loss_order_id' => null,
-                'take_profit_order_id' => null,
-                'stop_loss_price' => $stopLoss,
-                'take_profit_price' => $takeProfit
-            ];
+            Log::info("Placing Binance futures order: " . json_encode($orderParams));
+            
+            $response = Http::withHeaders([
+                'X-MBX-APIKEY' => $this->apiKey
+            ])->asForm()->post('https://fapi.binance.com' . $endpoint, $orderParams);
+            
+            Log::info("Binance futures order response: " . $response->body());
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                $mainOrderId = $data['orderId'];
+                
+                // Place stop loss and take profit orders if provided
+                $stopLossOrderId = null;
+                $takeProfitOrderId = null;
+                
+                if ($stopLoss !== null) {
+                    $stopLossOrderId = $this->placeBinanceStopLossOrder($binanceSymbol, $side, $quantity, $stopLoss, $timestamp);
+                }
+                
+                if ($takeProfit !== null) {
+                    $takeProfitOrderId = $this->placeBinanceTakeProfitOrder($binanceSymbol, $side, $quantity, $takeProfit, $timestamp);
+                }
+                
+                return [
+                    'order_id' => $mainOrderId,
+                    'symbol' => $symbol,
+                    'side' => $side,
+                    'quantity' => $quantity,
+                    'price' => $data['avgPrice'] ?? $data['price'] ?? 0,
+                    'status' => $data['status'],
+                    'stop_loss_order_id' => $stopLossOrderId,
+                    'take_profit_order_id' => $takeProfitOrderId,
+                    'stop_loss_price' => $stopLoss,
+                    'take_profit_price' => $takeProfit,
+                    'exchange_response' => $data
+                ];
+            }
+            
+            Log::error("Binance futures order failed: " . $response->body());
+            throw new \Exception("Binance futures order failed: " . $response->body());
+            
+        } catch (\Exception $e) {
+            Log::error("Error placing Binance futures order: " . $e->getMessage());
+            Log::error("Stack trace: " . $e->getTraceAsString());
+            throw $e;
         }
-        
-        Log::error("Binance futures order failed: " . $response->body());
-        throw new \Exception("Binance futures order failed: " . $response->body());
     }
     
     /**
-     * Calculate limit price based on order side and buffer
+     * Place Binance stop loss order
      */
-    private function calculateLimitPrice($symbol, $side, $buffer = 0.001): float
+    private function placeBinanceStopLossOrder($symbol, $side, $quantity, $stopLossPrice, $timestamp): ?string
     {
-        // Get current market price
-        $currentPrice = $this->getCurrentPrice(str_replace('USDT', '-USDT', $symbol));
-        
-        if ($side === 'buy') {
-            // For buy orders, use a price slightly below current price for better fill rate
-            return $currentPrice * (1 - $buffer);
-        } else {
-            // For sell orders, use a price slightly above current price for better fill rate
-            return $currentPrice * (1 + $buffer);
+        try {
+            $endpoint = '/fapi/v1/order';
+            
+            // For stop loss, we need to place a stop market order
+            $orderParams = [
+                'symbol' => $symbol,
+                'side' => $side === 'buy' ? 'SELL' : 'BUY', // Opposite side for stop loss
+                'type' => 'STOP_MARKET',
+                'quantity' => $quantity,
+                'stopPrice' => round($stopLossPrice, 4),
+                'timestamp' => (int)$timestamp
+            ];
+            
+            $queryString = http_build_query($orderParams);
+            $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+            $orderParams['signature'] = $signature;
+            
+            Log::info("Placing Binance stop loss order: " . json_encode($orderParams));
+            
+            $response = Http::withHeaders([
+                'X-MBX-APIKEY' => $this->apiKey
+            ])->asForm()->post('https://fapi.binance.com' . $endpoint, $orderParams);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                Log::info("Stop loss order placed successfully: " . $data['orderId']);
+                return $data['orderId'];
+            }
+            
+            Log::error("Stop loss order failed: " . $response->body());
+            return null;
+            
+        } catch (\Exception $e) {
+            Log::error("Error placing stop loss order: " . $e->getMessage());
+            return null;
         }
     }
+    
+    /**
+     * Place Binance take profit order
+     */
+    private function placeBinanceTakeProfitOrder($symbol, $side, $quantity, $takeProfitPrice, $timestamp): ?string
+    {
+        try {
+            $endpoint = '/fapi/v1/order';
+            
+            // For take profit, we need to place a limit order
+            $orderParams = [
+                'symbol' => $symbol,
+                'side' => $side === 'buy' ? 'SELL' : 'BUY', // Opposite side for take profit
+                'type' => 'LIMIT',
+                'timeInForce' => 'GTC',
+                'quantity' => $quantity,
+                'price' => round($takeProfitPrice, 4),
+                'timestamp' => (int)$timestamp
+            ];
+            
+            $queryString = http_build_query($orderParams);
+            $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+            $orderParams['signature'] = $signature;
+            
+            Log::info("Placing Binance take profit order: " . json_encode($orderParams));
+            
+            $response = Http::withHeaders([
+                'X-MBX-APIKEY' => $this->apiKey
+            ])->asForm()->post('https://fapi.binance.com' . $endpoint, $orderParams);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                Log::info("Take profit order placed successfully: " . $data['orderId']);
+                return $data['orderId'];
+            }
+            
+            Log::error("Take profit order failed: " . $response->body());
+            return null;
+            
+        } catch (\Exception $e) {
+            Log::error("Error placing take profit order: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+
     
     /**
      * Get futures quantity precision for a symbol
@@ -1224,4 +1299,5 @@ class ExchangeService
         // Mock implementation for now
         return [];
     }
+    
 }

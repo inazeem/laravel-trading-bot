@@ -104,9 +104,10 @@ class TradingBotService
             
             $this->logger->info("⏰ [TIMEFRAME] Processing {$timeframe} timeframe (interval: {$interval})...");
             
-            // Get candlestick data
-            $this->logger->info("📈 [CANDLES] Fetching 500 candlesticks for {$this->bot->symbol} on {$timeframe}...");
-            $candles = $this->exchangeService->getCandles($this->bot->symbol, $interval, 500);
+            // Get candlestick data - optimized for micro trading
+            $candleLimit = $this->getOptimalCandleLimit($timeframe);
+            $this->logger->info("📈 [CANDLES] Fetching {$candleLimit} candlesticks for {$this->bot->symbol} on {$timeframe}...");
+            $candles = $this->exchangeService->getCandles($this->bot->symbol, $interval, $candleLimit);
             if (empty($candles)) {
                 $this->logger->warning("⚠️ [CANDLES] No candle data received for {$timeframe} timeframe");
                 continue;
@@ -137,6 +138,17 @@ class TradingBotService
         
         Log::info("🎯 [SUMMARY] Total signals generated across all timeframes: " . count($allSignals));
         return $allSignals;
+    }
+
+    /**
+     * Get optimal candle limit based on timeframe for micro trading
+     */
+    private function getOptimalCandleLimit(string $timeframe): int
+    {
+        // Use configuration for micro trading optimization
+        $limits = config('micro_trading.candle_limits', []);
+        
+        return $limits[$timeframe] ?? 100; // Default fallback
     }
 
     /**

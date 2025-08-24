@@ -48,7 +48,9 @@ class SmartMoneyConceptsService
      */
     private function identifySwingPoints(): void
     {
-        $length = 5; // Swing detection length
+        // For micro trading, use shorter swing detection length
+        // This makes the analysis more sensitive to recent price movements
+        $length = config('micro_trading.trend_analysis.swing_detection_length', 3);
         
         for ($i = $length; $i < count($this->candles) - $length; $i++) {
             $candle = $this->candles[$i];
@@ -379,7 +381,10 @@ class SmartMoneyConceptsService
      */
     private function analyzeMarketTrend(): array
     {
-        $recentCandles = array_slice($this->candles, -20); // Last 20 candles
+        // For micro trading, use fewer candles for trend analysis
+        // This makes the analysis more responsive to recent price action
+        $candleCount = min(config('micro_trading.trend_analysis.candles_for_trend', 10), count($this->candles));
+        $recentCandles = array_slice($this->candles, -$candleCount);
         $firstPrice = $recentCandles[0]['close'];
         $lastPrice = end($recentCandles)['close'];
         
@@ -392,7 +397,8 @@ class SmartMoneyConceptsService
             'strength' => min(1.0, $strength),
             'change_percent' => $change,
             'first_price' => $firstPrice,
-            'last_price' => $lastPrice
+            'last_price' => $lastPrice,
+            'candles_analyzed' => $candleCount
         ];
     }
     
