@@ -31,6 +31,7 @@ return [
     // Signal generation settings for micro trading
     'signal_settings' => [
         'min_strength_threshold' => 0.4,  // Lower threshold for more signals
+        'high_strength_requirement' => 0.70,  // 70% strength requirement for trade placement (reduced from 90%)
         'min_confluence' => 1,  // Single timeframe confirmation for faster signals
         'max_trade_duration_hours' => 2,  // Maximum trade duration
     ],

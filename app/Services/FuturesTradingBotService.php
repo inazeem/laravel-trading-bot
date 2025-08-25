@@ -208,6 +208,17 @@ class FuturesTradingBotService
         
         Log::info("🔍 [FILTER] Filtering and ranking " . count($signals) . " signals...");
         
+        // CRITICAL FIX: Check for existing open position BEFORE processing signals
+        $existingOpenTrade = $this->getOpenTrade();
+        if ($existingOpenTrade) {
+            Log::info("🚫 [MULTIPLE TRADES PREVENTION] Found existing open position - skipping new signal processing");
+            Log::info("📊 [EXISTING POSITION] Trade ID: {$existingOpenTrade->id}, Side: {$existingOpenTrade->side}, Status: {$existingOpenTrade->status}");
+            
+            // Only handle existing position monitoring, don't process new signals
+            $this->handleExistingPosition($existingOpenTrade, $signals[0], $currentPrice);
+            return;
+        }
+        
         // Filter and rank signals
         $filteredSignals = $this->filterSignals($signals);
         
@@ -217,6 +228,13 @@ class FuturesTradingBotService
         if (!empty($filteredSignals)) {
             $bestSignal = $filteredSignals[0];
             Log::info("🎯 [BEST SIGNAL] Processing best signal: Type: {$bestSignal['type']}, Direction: {$bestSignal['direction']}, Strength: {$bestSignal['strength']}, Confluence: {$bestSignal['confluence']}");
+            
+            // CRITICAL FIX: Double-check no open position exists before placing trade
+            $doubleCheckOpenTrade = $this->getOpenTrade();
+            if ($doubleCheckOpenTrade) {
+                Log::warning("🚨 [SAFETY CHECK] Open position detected during signal processing - aborting new trade");
+                return;
+            }
             
             // Check if it's a good time for new trade (micro trading optimized)
             if ($this->isGoodTimeForNewTrade()) {
@@ -228,49 +246,51 @@ class FuturesTradingBotService
     }
 
     /**
-     * Filter and rank signals based on strength and confluence - optimized for micro trading
+     * Filter and rank signals based on strength and confluence - HIGH STRENGTH REQUIREMENT
      */
     private function filterSignals(array $signals): array
     {
         $filtered = [];
-        $this->logger->info("🔍 [FILTER] Starting to filter " . count($signals) . " signals for micro trading...");
+        $this->logger->info("🔍 [FILTER] Starting to filter " . count($signals) . " signals with HIGH STRENGTH requirement...");
         
         foreach ($signals as $index => $signal) {
             $this->logger->info("🔍 [FILTER] Processing signal {$index}: " . json_encode($signal));
             
-            // Minimum strength threshold - optimized for micro trading
-            $minStrength = config('micro_trading.signal_settings.min_strength_threshold', 0.4);
-            if (($signal['strength'] ?? 0) < $minStrength) {
-                $this->logger->info("❌ [FILTER] Signal {$index} rejected - strength too low: " . ($signal['strength'] ?? 0) . " (minimum: {$minStrength})");
+            // CRITICAL REQUIREMENT: Only accept signals with strength above 90%
+            $requiredStrength = config('micro_trading.signal_settings.high_strength_requirement', 0.90); // 90% strength requirement
+            $signalStrength = $signal['strength'] ?? 0;
+            
+            if ($signalStrength < $requiredStrength) {
+                $this->logger->info("❌ [FILTER] Signal {$index} rejected - strength too low: {$signalStrength} (required: {$requiredStrength} = " . ($requiredStrength * 100) . "%)");
                 continue;
             }
             
-            $this->logger->info("✅ [FILTER] Signal {$index} passed strength check");
+            $this->logger->info("✅ [FILTER] Signal {$index} passed HIGH STRENGTH requirement: {$signalStrength} >= {$requiredStrength} (" . ($requiredStrength * 100) . "%)");
             
             // Check for signal confluence across timeframes
             $confluence = $this->calculateSignalConfluence($signal, $signals);
             $this->logger->info("🔗 [FILTER] Signal {$index} confluence: {$confluence}");
             
-            // Micro trading: prioritize faster signals with lower confluence requirements
-            $minConfluence = config('micro_trading.signal_settings.min_confluence', 1);
+            // For high-strength signals (90%+), we can be more flexible with confluence
+            $minConfluence = 1; // Minimum confluence requirement for 90%+ strength signals
             
             if ($confluence >= $minConfluence) {
                 $signal['confluence'] = $confluence;
                 $filtered[] = $signal;
-                $this->logger->info("✅ [FILTER] Signal {$index} accepted (confluence: {$confluence})");
+                $this->logger->info("✅ [FILTER] Signal {$index} accepted (high strength: {$signalStrength}, confluence: {$confluence})");
             } else {
-                // For micro trading, also accept high-strength single timeframe signals
-                if (($signal['strength'] ?? 0) >= 0.7) {
-                    $signal['confluence'] = 1; // Single timeframe confluence
-                    $filtered[] = $signal;
-                    $this->logger->info("✅ [FILTER] Signal {$index} accepted (high strength single timeframe)");
-                } else {
-                    $this->logger->info("❌ [FILTER] Signal {$index} rejected - insufficient confluence: {$confluence}");
-                }
+                // Even for 90%+ strength, we still need some confluence
+                $this->logger->info("❌ [FILTER] Signal {$index} rejected - insufficient confluence: {$confluence} (minimum: {$minConfluence})");
             }
         }
         
-        $this->logger->info("📊 [FILTER] Filtering complete: " . count($filtered) . " signals passed");
+        $this->logger->info("📊 [FILTER] Filtering complete: " . count($filtered) . " signals passed HIGH STRENGTH requirement");
+        
+        if (empty($filtered)) {
+            $this->logger->info("⚠️ [FILTER] No signals met the " . ($requiredStrength * 100) . "% strength requirement - no trades will be placed");
+        } else {
+            $this->logger->info("🎯 [FILTER] Found " . count($filtered) . " signals with " . ($requiredStrength * 100) . "%+ strength - proceeding with trade evaluation");
+        }
         
         // Sort by SMC priority: OrderBlock_Support/Resistance > Breakout > BOS/CHoCH
         usort($filtered, function($a, $b) {
@@ -340,21 +360,6 @@ class FuturesTradingBotService
     {
         $this->logger->info("🚀 [NEW SIGNAL] Starting to process new signal: " . json_encode($signal));
         
-        // STRONG ENFORCEMENT: Check for ANY existing open trade
-        $existingOpenTrade = $this->getOpenTrade();
-        if ($existingOpenTrade) {
-            $this->logger->info("🚫 [SINGLE POSITION] Skipping new signal - already have open trade ID: {$existingOpenTrade->id}");
-            $this->logger->info("🚫 [SINGLE POSITION] This prevents multiple trades from being placed");
-            return;
-        }
-        
-        // Check if we're in cooldown period after closing a position
-        if ($this->isInCooldownPeriod()) {
-            $this->logger->info("⏰ [COOLDOWN] Skipping new signal - bot is in cooldown period after recent position closure");
-            return;
-        }
-        $this->logger->info("🚀 [NEW SIGNAL] Starting to process new signal: " . json_encode($signal));
-        
         // Check if we're in cooldown period after closing a position
         if ($this->isInCooldownPeriod()) {
             $this->logger->info("⏰ [COOLDOWN] Skipping new signal - bot is in cooldown period after recent position closure");
@@ -388,6 +393,9 @@ class FuturesTradingBotService
         } else {
             $this->logger->info("✅ [BTC CORRELATION] Bitcoin correlation check skipped (disabled or BTC trading)");
         }
+
+        // Close any existing position first
+        $this->closeExistingPosition();
 
         // Calculate position size
         $positionSize = $this->calculatePositionSize($currentPrice);
@@ -443,13 +451,20 @@ class FuturesTradingBotService
     }
 
     /**
-     * Handle existing position for futures
+     * Handle existing position for futures - IMPROVED VERSION
      */
     private function handleExistingPosition(FuturesTrade $trade, array $signal, float $currentPrice): void
     {
         // Log current position status
         $unrealizedPnL = $trade->calculateUnrealizedPnL($currentPrice);
         $pnlPercentage = $trade->calculatePnLPercentage();
+        
+        // CRITICAL FIX: Use persistent PnL if available
+        $persistentPnL = $this->getPersistentPnL($trade->id);
+        if ($persistentPnL !== null) {
+            $unrealizedPnL = $persistentPnL;
+            $this->logger->info("💾 [PERSISTENT PNL] Using persistent PnL: {$unrealizedPnL}");
+        }
         
         $this->logger->info("📊 [POSITION] Monitoring existing {$trade->side} position:");
         $this->logger->info("   Entry Price: {$trade->entry_price}");
@@ -459,6 +474,15 @@ class FuturesTradingBotService
         $this->logger->info("   Unrealized PnL: {$unrealizedPnL}");
         $this->logger->info("   PnL %: {$pnlPercentage}%");
         
+        // CRITICAL FIX: Save current PnL to persistent storage
+        $this->savePersistentPnL($trade->id, $unrealizedPnL);
+        
+        // Update trade with current PnL
+        $trade->update([
+            'unrealized_pnl' => $unrealizedPnL,
+            'pnl_percentage' => $pnlPercentage,
+        ]);
+        
         // Check if we should close the position
         $shouldClose = $this->shouldClosePosition($trade, $signal, $currentPrice);
         
@@ -467,6 +491,9 @@ class FuturesTradingBotService
             $this->closePosition($trade, $currentPrice);
         } else {
             $this->logger->info("✅ [HOLD] Position conditions stable - continuing to monitor");
+            
+            // CRITICAL FIX: Don't process new signals when we have an existing position
+            $this->logger->info("🚫 [MULTIPLE TRADES PREVENTION] Skipping new signal processing - position already open");
         }
     }
 
@@ -923,12 +950,12 @@ class FuturesTradingBotService
     }
 
     /**
-     * Sync positions with exchange to ensure database accuracy
+     * Sync positions with exchange - IMPROVED VERSION
      */
     private function syncPositionsWithExchange(): void
     {
         try {
-            $this->logger->info("🔄 [SYNC] Syncing positions with exchange...");
+            $this->logger->info("🔄 [SYNC] Starting position synchronization with exchange...");
             
             // Get actual open positions from exchange
             $exchangePositions = $this->exchangeService->getOpenPositions($this->bot->symbol);
@@ -960,6 +987,9 @@ class FuturesTradingBotService
                                 }
                                 
                                 $this->logger->info("📊 [SYNC] Calculated PnL: {$pnl} (Entry: {$openTrades->entry_price}, Current: {$currentPrice})");
+                                
+                                // CRITICAL FIX: Save PnL to persistent storage before closing
+                                $this->savePersistentPnL($openTrades->id, $pnl);
                                 
                                 $openTrades->update([
                                     'status' => 'closed',
@@ -1016,6 +1046,9 @@ class FuturesTradingBotService
                     if ($trade) {
                         $this->logger->info("✅ [SYNC] Found matching open trade in database (ID: {$trade->id})");
                         
+                        // CRITICAL FIX: Save current PnL to persistent storage
+                        $this->savePersistentPnL($trade->id, $position['unrealized_pnl']);
+                        
                         // Update trade with current position data
                         $trade->update([
                             'quantity' => $position['quantity'],
@@ -1027,30 +1060,23 @@ class FuturesTradingBotService
                         
                         $this->logger->info("📝 [SYNC] Updated trade with current position data");
                     } else {
-                        $this->logger->warning("⚠️ [SYNC] No matching open trade found in database");
+                        $this->logger->warning("⚠️ [SYNC] No matching open trade found in database - creating new trade record");
                         
-                        // Check if we have a closed trade that should be open
-                        $closedTrade = FuturesTrade::where('futures_trading_bot_id', $this->bot->id)
-                            ->where('symbol', $dbSymbol)
-                            ->where('side', $position['side'])
-                            ->where('status', 'closed')
-                            ->latest()
-                            ->first();
+                        // Create new trade record for position found on exchange
+                        $newTrade = FuturesTrade::create([
+                            'futures_trading_bot_id' => $this->bot->id,
+                            'symbol' => $dbSymbol,
+                            'side' => $position['side'],
+                            'quantity' => $position['quantity'],
+                            'entry_price' => $position['entry_price'],
+                            'unrealized_pnl' => $position['unrealized_pnl'],
+                            'leverage' => $position['leverage'],
+                            'margin_type' => $position['margin_type'],
+                            'status' => 'open',
+                            'opened_at' => now(),
+                        ]);
                         
-                        if ($closedTrade) {
-                            $this->logger->info("🔄 [SYNC] Found closed trade that should be open - reopening...");
-                            
-                            $closedTrade->update([
-                                'status' => 'open',
-                                'quantity' => $position['quantity'],
-                                'entry_price' => $position['entry_price'],
-                                'unrealized_pnl' => $position['unrealized_pnl'],
-                                'exit_price' => null,
-                                'closed_at' => null
-                            ]);
-                            
-                            $this->logger->info("✅ [SYNC] Reopened trade ID {$closedTrade->id}");
-                        }
+                        $this->logger->info("✅ [SYNC] Created new trade record for exchange position (ID: {$newTrade->id})");
                     }
                 }
             }
@@ -1059,6 +1085,64 @@ class FuturesTradingBotService
             
         } catch (\Exception $e) {
             $this->logger->error("❌ [SYNC] Error during position synchronization: " . $e->getMessage());
+            $this->logger->error("🔍 [STACK] " . $e->getTraceAsString());
+        }
+    }
+    
+    /**
+     * Save PnL to persistent storage to prevent data loss during session flushes
+     */
+    private function savePersistentPnL(int $tradeId, float $pnl): void
+    {
+        try {
+            // Save to a dedicated PnL tracking table or cache
+            $cacheKey = "trade_pnl_{$tradeId}";
+            cache()->put($cacheKey, $pnl, now()->addDays(30)); // Cache for 30 days
+            
+            // Also save to database for permanent storage
+            DB::table('futures_trade_pnl_history')->updateOrInsert(
+                ['futures_trade_id' => $tradeId],
+                [
+                    'pnl_value' => $pnl,
+                    'updated_at' => now()
+                ]
+            );
+            
+            $this->logger->info("💾 [PERSISTENT PNL] Saved PnL {$pnl} for trade {$tradeId} to persistent storage");
+        } catch (\Exception $e) {
+            $this->logger->error("❌ [PERSISTENT PNL] Failed to save PnL: " . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Get persistent PnL from storage
+     */
+    private function getPersistentPnL(int $tradeId): ?float
+    {
+        try {
+            // Try cache first
+            $cacheKey = "trade_pnl_{$tradeId}";
+            $cachedPnL = cache()->get($cacheKey);
+            
+            if ($cachedPnL !== null) {
+                return $cachedPnL;
+            }
+            
+            // Fallback to database
+            $dbPnL = DB::table('futures_trade_pnl_history')
+                ->where('futures_trade_id', $tradeId)
+                ->value('pnl_value');
+            
+            if ($dbPnL !== null) {
+                // Restore to cache
+                cache()->put($cacheKey, $dbPnL, now()->addDays(30));
+                return $dbPnL;
+            }
+            
+            return null;
+        } catch (\Exception $e) {
+            $this->logger->error("❌ [PERSISTENT PNL] Failed to get PnL: " . $e->getMessage());
+            return null;
         }
     }
 
@@ -1180,16 +1264,6 @@ class FuturesTradingBotService
      */
     private function getOpenTrade(): ?FuturesTrade
     {
-        // More robust check for open trades
-        $openTrade = $this->bot->openTrades()->first();
-        
-        if ($openTrade) {
-            $this->logger->info("🔍 [OPEN TRADE CHECK] Found open trade ID: {$openTrade->id}, Status: {$openTrade->status}");
-        } else {
-            $this->logger->info("🔍 [OPEN TRADE CHECK] No open trades found");
-        }
-        
-        return $openTrade;
         return $this->bot->openTrades()->first();
     }
 
@@ -1226,11 +1300,22 @@ class FuturesTradingBotService
     }
 
     /**
-     * Close position
+     * Close position - IMPROVED VERSION
      */
     public function closePosition(FuturesTrade $trade, float $currentPrice): void
     {
         try {
+            $this->logger->info("🔴 [CLOSE POSITION] Starting position closure for trade ID: {$trade->id}");
+            
+            // CRITICAL FIX: Save current PnL before closing
+            $finalPnL = $trade->calculateUnrealizedPnL($currentPrice);
+            $pnlPercentage = $trade->calculatePnLPercentage();
+            
+            $this->logger->info("📊 [CLOSE POSITION] Final PnL: {$finalPnL}, PnL%: {$pnlPercentage}%");
+            
+            // Save to persistent storage
+            $this->savePersistentPnL($trade->id, $finalPnL);
+            
             $side = $trade->isLong() ? 'sell' : 'buy';
             
             $orderResult = $this->exchangeService->closeFuturesPosition(
@@ -1241,25 +1326,44 @@ class FuturesTradingBotService
             );
             
             if ($orderResult) {
-                $realizedPnL = $trade->calculateUnrealizedPnL($currentPrice);
-                $pnlPercentage = $trade->calculatePnLPercentage();
+                $this->logger->info("✅ [CLOSE POSITION] Position closed successfully on exchange");
                 
+                // Update trade with final PnL
                 $trade->update([
                     'exit_price' => $currentPrice,
-                    'realized_pnl' => $realizedPnL,
+                    'realized_pnl' => $finalPnL,
                     'pnl_percentage' => $pnlPercentage,
                     'status' => 'closed',
                     'closed_at' => now(),
                 ]);
                 
+                $this->logger->info("💾 [CLOSE POSITION] Trade updated in database with final PnL");
+                
                 // Set cooldown period after closing position
                 $this->setCooldownPeriod();
                 
-                $this->logger->info("Position closed: PnL = {$realizedPnL}, PnL% = {$pnlPercentage}%");
                 $this->logger->info("⏰ [COOLDOWN] Cooldown period activated - no new positions for 30 minutes");
+            } else {
+                $this->logger->error("❌ [CLOSE POSITION] Failed to close position on exchange");
+                
+                // Even if exchange close fails, update with current PnL for tracking
+                $trade->update([
+                    'unrealized_pnl' => $finalPnL,
+                    'pnl_percentage' => $pnlPercentage,
+                ]);
             }
         } catch (\Exception $e) {
-            $this->logger->error("Failed to close position: " . $e->getMessage());
+            $this->logger->error("❌ [CLOSE POSITION] Error closing position: " . $e->getMessage());
+            $this->logger->error("🔍 [STACK] " . $e->getTraceAsString());
+            
+            // Save PnL even if close fails
+            try {
+                $finalPnL = $trade->calculateUnrealizedPnL($currentPrice);
+                $this->savePersistentPnL($trade->id, $finalPnL);
+                $this->logger->info("💾 [CLOSE POSITION] Saved PnL despite close failure: {$finalPnL}");
+            } catch (\Exception $saveError) {
+                $this->logger->error("❌ [CLOSE POSITION] Failed to save PnL: " . $saveError->getMessage());
+            }
         }
     }
 
@@ -1356,5 +1460,8 @@ class FuturesTradingBotService
         
         $this->logger->info("✅ [TIMING] Good time for new trade - all conditions met");
         return true;
+
+
     }
 }
+
