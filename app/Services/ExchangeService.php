@@ -749,6 +749,112 @@ class ExchangeService
     }
 
     /**
+     * Set leverage for Binance futures symbol
+     */
+    private function setBinanceFuturesLeverage($symbol, $leverage, $marginType = 'isolated')
+    {
+        try {
+            // Get server time from Binance
+            $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
+            if ($serverTimeResponse->successful()) {
+                $serverTime = $serverTimeResponse->json()['serverTime'];
+                $timestamp = $serverTime;
+            } else {
+                $timestamp = round(microtime(true) * 1000);
+            }
+            
+            $endpoint = '/fapi/v1/leverage';
+            
+            // Normalize symbol for Binance (remove dash)
+            $binanceSymbol = str_replace('-', '', $symbol);
+            
+            $params = [
+                'symbol' => $binanceSymbol,
+                'leverage' => (int)$leverage,
+                'timestamp' => (int)$timestamp
+            ];
+            
+            $queryString = http_build_query($params);
+            $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+            $params['signature'] = $signature;
+            
+            Log::info("Setting Binance futures leverage: " . json_encode($params));
+            
+            $response = Http::withHeaders([
+                'X-MBX-APIKEY' => $this->apiKey
+            ])->asForm()->post('https://fapi.binance.com' . $endpoint, $params);
+            
+            Log::info("Binance leverage setting response: " . $response->body());
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                Log::info("✅ Leverage set successfully for {$binanceSymbol}: {$leverage}x");
+                return true;
+            }
+            
+            Log::error("Failed to set leverage: " . $response->body());
+            return false;
+            
+        } catch (\Exception $e) {
+            Log::error("Error setting Binance futures leverage: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Set margin type for Binance futures symbol
+     */
+    private function setBinanceFuturesMarginType($symbol, $marginType)
+    {
+        try {
+            // Get server time from Binance
+            $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
+            if ($serverTimeResponse->successful()) {
+                $serverTime = $serverTimeResponse->json()['serverTime'];
+                $timestamp = $serverTime;
+            } else {
+                $timestamp = round(microtime(true) * 1000);
+            }
+            
+            $endpoint = '/fapi/v1/marginType';
+            
+            // Normalize symbol for Binance (remove dash)
+            $binanceSymbol = str_replace('-', '', $symbol);
+            
+            $params = [
+                'symbol' => $binanceSymbol,
+                'marginType' => strtoupper($marginType),
+                'timestamp' => (int)$timestamp
+            ];
+            
+            $queryString = http_build_query($params);
+            $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+            $params['signature'] = $signature;
+            
+            Log::info("Setting Binance futures margin type: " . json_encode($params));
+            
+            $response = Http::withHeaders([
+                'X-MBX-APIKEY' => $this->apiKey
+            ])->asForm()->post('https://fapi.binance.com' . $endpoint, $params);
+            
+            Log::info("Binance margin type setting response: " . $response->body());
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                Log::info("✅ Margin type set successfully for {$binanceSymbol}: {$marginType}");
+                return true;
+            }
+            
+            Log::error("Failed to set margin type: " . $response->body());
+            return false;
+            
+        } catch (\Exception $e) {
+            Log::error("Error setting Binance futures margin type: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Place KuCoin futures order
      */
     private function placeKuCoinFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss = null, $takeProfit = null)
@@ -779,10 +885,28 @@ class ExchangeService
                 $timestamp = round(microtime(true) * 1000);
             }
             
-            $endpoint = '/fapi/v1/order';
-            
             // Normalize symbol for Binance (remove dash)
             $binanceSymbol = str_replace('-', '', $symbol);
+            
+            // Set leverage and margin type before placing order
+            Log::info("Setting leverage to {$leverage}x and margin type to {$marginType} for {$binanceSymbol}");
+            
+            // Set margin type first
+            $marginTypeSet = $this->setBinanceFuturesMarginType($binanceSymbol, $marginType);
+            if (!$marginTypeSet) {
+                Log::warning("Failed to set margin type, but continuing with order placement");
+            }
+            
+            // Set leverage
+            $leverageSet = $this->setBinanceFuturesLeverage($binanceSymbol, $leverage, $marginType);
+            if (!$leverageSet) {
+                Log::warning("Failed to set leverage, but continuing with order placement");
+            }
+            
+            // Wait a moment for settings to take effect
+            sleep(1);
+            
+            $endpoint = '/fapi/v1/order';
             
             // Get appropriate precision for this symbol
             $precision = $this->getFuturesQuantityPrecision($binanceSymbol);

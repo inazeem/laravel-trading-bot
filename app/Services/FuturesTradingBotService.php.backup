@@ -340,21 +340,6 @@ class FuturesTradingBotService
     {
         $this->logger->info("🚀 [NEW SIGNAL] Starting to process new signal: " . json_encode($signal));
         
-        // STRONG ENFORCEMENT: Check for ANY existing open trade
-        $existingOpenTrade = $this->getOpenTrade();
-        if ($existingOpenTrade) {
-            $this->logger->info("🚫 [SINGLE POSITION] Skipping new signal - already have open trade ID: {$existingOpenTrade->id}");
-            $this->logger->info("🚫 [SINGLE POSITION] This prevents multiple trades from being placed");
-            return;
-        }
-        
-        // Check if we're in cooldown period after closing a position
-        if ($this->isInCooldownPeriod()) {
-            $this->logger->info("⏰ [COOLDOWN] Skipping new signal - bot is in cooldown period after recent position closure");
-            return;
-        }
-        $this->logger->info("🚀 [NEW SIGNAL] Starting to process new signal: " . json_encode($signal));
-        
         // Check if we're in cooldown period after closing a position
         if ($this->isInCooldownPeriod()) {
             $this->logger->info("⏰ [COOLDOWN] Skipping new signal - bot is in cooldown period after recent position closure");
@@ -388,6 +373,9 @@ class FuturesTradingBotService
         } else {
             $this->logger->info("✅ [BTC CORRELATION] Bitcoin correlation check skipped (disabled or BTC trading)");
         }
+
+        // Close any existing position first
+        $this->closeExistingPosition();
 
         // Calculate position size
         $positionSize = $this->calculatePositionSize($currentPrice);
@@ -1180,16 +1168,6 @@ class FuturesTradingBotService
      */
     private function getOpenTrade(): ?FuturesTrade
     {
-        // More robust check for open trades
-        $openTrade = $this->bot->openTrades()->first();
-        
-        if ($openTrade) {
-            $this->logger->info("🔍 [OPEN TRADE CHECK] Found open trade ID: {$openTrade->id}, Status: {$openTrade->status}");
-        } else {
-            $this->logger->info("🔍 [OPEN TRADE CHECK] No open trades found");
-        }
-        
-        return $openTrade;
         return $this->bot->openTrades()->first();
     }
 
