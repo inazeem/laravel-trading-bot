@@ -5,8 +5,11 @@ namespace App\Services;
 use App\Models\TradingBot;
 use App\Models\Trade;
 use App\Models\Signal;
+use App\Models\UserAssetHolding;
+use App\Models\Asset;
 use Illuminate\Support\Facades\Log;
 use App\Services\TradingBotLogger;
+use App\Services\AssetHoldingsService;
 use Illuminate\Support\Facades\DB;
 
 class TradingBotService
@@ -15,6 +18,7 @@ class TradingBotService
     private ExchangeService $exchangeService;
     private SmartMoneyConceptsService $smcService;
     private TradingBotLogger $logger;
+    private AssetHoldingsService $holdingsService;
     private array $timeframeIntervals = [
         '1h' => '1h',
         '4h' => '4h', 
@@ -45,6 +49,7 @@ class TradingBotService
         $this->bot = $bot->load('apiKey');
         $this->exchangeService = new ExchangeService($bot->apiKey);
         $this->logger = new TradingBotLogger($bot);
+        $this->holdingsService = new AssetHoldingsService();
     }
 
     /**
@@ -61,6 +66,20 @@ class TradingBotService
             // Update bot status
             $this->bot->update(['status' => 'running', 'last_run_at' => now()]);
             
+            // Sync assets with exchange first
+            $this->logger->info("🔄 [ASSET SYNC] Starting asset synchronization with exchange...");
+            $this->syncAssetsWithExchange();
+            
+            // Check USDT balance before proceeding
+            $usdtBalance = $this->getUSDTBalance();
+            $this->logger->info("💰 [USDT BALANCE] Current USDT balance: {$usdtBalance}");
+            
+            if ($usdtBalance <= 0) {
+                $this->logger->warning("⚠️ [USDT BALANCE] No USDT balance available - skipping signal processing");
+                $this->bot->update(['status' => 'idle']);
+                return;
+            }
+            
             // Get current price
             $this->logger->info("💰 [PRICE] Fetching current price for {$this->bot->symbol}...");
             $currentPrice = $this->exchangeService->getCurrentPrice($this->bot->symbol);
@@ -69,6 +88,13 @@ class TradingBotService
                 return;
             }
             $this->logger->info("✅ [PRICE] Current price: $currentPrice");
+            
+            // Check if we're in cooldown period
+            if ($this->isInCooldownPeriod()) {
+                $this->logger->info("⏰ [COOLDOWN] Bot is in 3-hour cooldown period - skipping signal processing");
+                $this->bot->update(['status' => 'idle']);
+                return;
+            }
             
             // Analyze all timeframes
             $this->logger->info("🔍 [ANALYSIS] Starting Smart Money Concepts analysis...");
@@ -152,7 +178,7 @@ class TradingBotService
     }
 
     /**
-     * Process trading signals
+     * Process trading signals with enhanced strength-based filtering
      */
     private function processSignals(array $signals, float $currentPrice): void
     {
@@ -161,56 +187,40 @@ class TradingBotService
             return;
         }
         
-        $this->logger->info("🔍 [FILTER] Filtering and ranking " . count($signals) . " signals...");
+        $this->logger->info("🔍 [FILTER] Filtering and ranking " . count($signals) . " signals with 70%+ strength requirement...");
         
         // Log all signals before filtering
         foreach ($signals as $index => $signal) {
             $this->logger->info("🔍 [PRE-FILTER] Signal {$index}: Type={$signal['type']}, Direction={$signal['direction']}, Strength={$signal['strength']}, Timeframe={$signal['timeframe']}");
         }
         
-        // Filter and rank signals
-        $filteredSignals = $this->filterSignals($signals);
+        // Filter signals with 70%+ strength requirement
+        $filteredSignals = $this->filterSignalsByStrength($signals);
         
-        $this->logger->info("✅ [FILTER] " . count($filteredSignals) . " signals passed filtering criteria");
+        $this->logger->info("✅ [FILTER] " . count($filteredSignals) . " signals passed 70%+ strength requirement");
         
         // Log filtered signals
         foreach ($filteredSignals as $index => $signal) {
-            $this->logger->info("✅ [FILTERED] Signal {$index}: Type={$signal['type']}, Direction={$signal['direction']}, Strength={$signal['strength']}, Normalized={$signal['normalized_strength']}, Timeframe={$signal['timeframe']}");
+            $this->logger->info("✅ [FILTERED] Signal {$index}: Type={$signal['type']}, Direction={$signal['direction']}, Strength={$signal['strength']}, Timeframe={$signal['timeframe']}");
         }
-        
-        // Group signals by direction and process only the strongest signal in each direction
-        $bullishSignals = array_filter($filteredSignals, fn($s) => $s['direction'] === 'bullish');
-        $bearishSignals = array_filter($filteredSignals, fn($s) => $s['direction'] === 'bearish');
-        
-        $this->logger->info("📊 [SIGNALS] Found " . count($bullishSignals) . " bullish and " . count($bearishSignals) . " bearish signals");
         
         // Process only the strongest signal in each direction
-        if (!empty($bullishSignals)) {
-            $strongestBullish = $this->getStrongestSignal($bullishSignals);
-            $this->logger->info("🎯 [PROCESS] Processing strongest bullish signal");
-            $this->processSignal($strongestBullish, $currentPrice);
-        }
-        
-        if (!empty($bearishSignals)) {
-            $strongestBearish = $this->getStrongestSignal($bearishSignals);
-            $this->logger->info("🎯 [PROCESS] Processing strongest bearish signal");
-            $this->processSignal($strongestBearish, $currentPrice);
-        }
-        
-        // If no signals passed filtering, save at least one signal for debugging
-        if (empty($filteredSignals) && !empty($signals)) {
-            $this->logger->info("🔧 [DEBUG] No signals passed filtering, saving first signal for debugging");
-            $debugSignal = $signals[0];
-            $this->saveSignal($debugSignal, $currentPrice, 0, 0, 0);
+        if (!empty($filteredSignals)) {
+            $strongestSignal = $this->getStrongestSignal($filteredSignals);
+            $this->logger->info("🎯 [PROCESS] Processing strongest signal with strength: {$strongestSignal['strength']}");
+            $this->processSignal($strongestSignal, $currentPrice);
+        } else {
+            $this->logger->info("⚠️ [FILTER] No signals met the 70%+ strength requirement - no trades will be placed");
         }
     }
 
     /**
-     * Filter and rank signals based on strength and confluence
+     * Filter signals by strength - only accept signals with 70%+ strength
      */
-    private function filterSignals(array $signals): array
+    private function filterSignalsByStrength(array $signals): array
     {
         $filtered = [];
+        $minStrength = 0.70; // 70% strength requirement
         
         foreach ($signals as $signal) {
             $strength = $signal['strength'] ?? 0;
@@ -225,107 +235,120 @@ class TradingBotService
                 $normalizedStrength = 0.1; // Minimum threshold for very large values
             }
             
-            // Lower minimum strength threshold (0.05 = 5%) to allow more signals through
-            if ($normalizedStrength < 0.05) {
-                continue;
-            }
+            $this->logger->info("🔍 [STRENGTH CHECK] Signal strength: {$strength} (normalized: {$normalizedStrength})");
             
-            // Check for signal confluence across timeframes
-            $confluence = $this->calculateSignalConfluence($signal, $signals);
-            
-            // If only one timeframe is configured, accept signals with good strength
-            if (count($this->bot->timeframes) === 1) {
-                if ($normalizedStrength >= 0.05) {
-                    $signal['confluence'] = 1; // Single timeframe confluence
-                    $signal['normalized_strength'] = $normalizedStrength;
-                    $filtered[] = $signal;
-                }
+            // Only accept signals with 70%+ strength
+            if ($normalizedStrength >= $minStrength) {
+                $signal['normalized_strength'] = $normalizedStrength;
+                $filtered[] = $signal;
+                $this->logger->info("✅ [STRENGTH CHECK] Signal passed 70%+ strength requirement");
             } else {
-                // Multiple timeframes: require confluence OR accept strong single timeframe signals
-                if ($confluence >= 1 || $normalizedStrength >= 0.3) { // At least 1 other timeframe OR strong single signal
-                    $signal['confluence'] = $confluence;
-                    $signal['normalized_strength'] = $normalizedStrength;
-                    $filtered[] = $signal;
-                }
+                $this->logger->info("❌ [STRENGTH CHECK] Signal rejected - strength too low: {$normalizedStrength} < {$minStrength}");
             }
         }
         
-        // Sort by confluence and normalized strength
+        // Sort by strength (highest first)
         usort($filtered, function($a, $b) {
-            $scoreA = ($a['confluence'] * 10) + ($a['normalized_strength'] ?? 0);
-            $scoreB = ($b['confluence'] * 10) + ($b['normalized_strength'] ?? 0);
-            return $scoreB <=> $scoreA;
+            return ($b['normalized_strength'] ?? 0) <=> ($a['normalized_strength'] ?? 0);
         });
         
         return $filtered;
     }
 
     /**
-     * Calculate signal confluence across timeframes
+     * Get the strongest signal from the filtered list
      */
-    private function calculateSignalConfluence(array $signal, array $allSignals): int
+    private function getStrongestSignal(array $signals): array
     {
-        $confluence = 0;
-        
-        foreach ($allSignals as $otherSignal) {
-            if ($otherSignal['type'] === $signal['type'] && 
-                $otherSignal['direction'] === $signal['direction'] &&
-                $otherSignal['timeframe'] !== $signal['timeframe']) {
-                $confluence++;
-            }
+        if (empty($signals)) {
+            return [];
         }
         
-        return $confluence;
+        // Return the first signal (already sorted by strength)
+        return $signals[0];
     }
 
     /**
-     * Process individual signal
+     * Process individual signal with 10% position sizing
      */
     private function processSignal(array $signal, float $currentPrice): void
     {
+        $this->logger->info("🔄 [PROCESS SIGNAL] Processing signal: " . json_encode($signal));
+        
         // Check if we already have an open position
         $openTrade = $this->getOpenTrade();
         
         if ($openTrade) {
+            $this->logger->info("📊 [EXISTING POSITION] Found open trade - handling existing position");
             $this->handleExistingPosition($openTrade, $signal, $currentPrice);
         } else {
+            $this->logger->info("🆕 [NO OPEN POSITION] No open trade found - handling new signal");
             $this->handleNewSignal($signal, $currentPrice);
         }
     }
 
     /**
-     * Handle new trading signal
+     * Handle new trading signal with 10% position sizing
      */
     private function handleNewSignal(array $signal, float $currentPrice): void
     {
-        Log::info("🎯 [SIGNAL] Processing new signal: Type={$signal['type']}, Direction={$signal['direction']}, Price={$currentPrice}");
+        $this->logger->info("🚀 [NEW SIGNAL] Starting to process new signal with 70%+ strength: " . json_encode($signal));
         
-        // Calculate position size
-        $positionSize = $this->calculatePositionSize($currentPrice);
-        
-        if ($positionSize <= 0) {
-            Log::warning("❌ [SIGNAL] Insufficient balance for trade - Position size calculated as: {$positionSize}");
+        // Check if we're in cooldown period after closing a position
+        if ($this->isInCooldownPeriod()) {
+            $this->logger->info("⏰ [COOLDOWN] Skipping new signal - bot is in 3-hour cooldown period after recent position closure");
             return;
         }
         
-        Log::info("✅ [SIGNAL] Position size calculated: {$positionSize}");
+        $this->logger->info("✅ [COOLDOWN] Not in cooldown period - proceeding");
+        
+        // Check balance based on signal direction
+        if ($signal['direction'] === 'bullish') {
+            // For bullish signals, check USDT balance for buying
+            $usdtBalance = $this->getUSDTBalance();
+            if ($usdtBalance <= 0) {
+                $this->logger->warning("❌ [USDT BALANCE] No USDT balance available for buy order - skipping bullish signal");
+                return;
+            }
+            $this->logger->info("✅ [USDT BALANCE] USDT balance available for buy: {$usdtBalance}");
+        } else {
+            // For bearish signals, check if we have enough asset to sell
+            $assetSymbol = $this->extractAssetSymbol($this->bot->symbol);
+            $userHolding = $this->holdingsService->getCurrentHoldings($this->bot->user_id, $assetSymbol);
+            
+            if (!$userHolding || $userHolding->quantity <= 0) {
+                $this->logger->warning("❌ [ASSET BALANCE] No {$assetSymbol} holdings available for sell order - skipping bearish signal");
+                return;
+            }
+            $this->logger->info("✅ [ASSET BALANCE] {$assetSymbol} holdings available for sell: {$userHolding->quantity}");
+        }
+        
+        // Calculate 10% position size based on signal direction
+        $positionSize = $this->calculateTenPercentPositionSize($currentPrice, $signal['direction']);
+        
+        if ($positionSize <= 0) {
+            $this->logger->warning("❌ [POSITION SIZE] Insufficient balance or holdings for 10% trade - Position size calculated as: {$positionSize}");
+            return;
+        }
+        
+        $this->logger->info("✅ [POSITION SIZE] 10% position size calculated: {$positionSize}");
         
         // Calculate stop loss and take profit
         $stopLoss = $this->calculateStopLoss($signal, $currentPrice);
         $takeProfit = $this->calculateTakeProfit($signal, $currentPrice);
         
-        Log::info("📊 [SIGNAL] Stop Loss: {$stopLoss}, Take Profit: {$takeProfit}");
+        $this->logger->info("📊 [RISK MANAGEMENT] Stop Loss: {$stopLoss}, Take Profit: {$takeProfit}");
         
         // Validate risk/reward ratio
         $riskRewardRatio = $this->calculateRiskRewardRatio($currentPrice, $stopLoss, $takeProfit);
-        Log::info("📈 [SIGNAL] Risk/Reward Ratio: {$riskRewardRatio}");
+        $this->logger->info("📈 [RISK/REWARD] Risk/Reward Ratio: {$riskRewardRatio}");
         
         if ($riskRewardRatio < 1.5) {
-            Log::info("❌ [SIGNAL] Risk/reward ratio too low: {$riskRewardRatio} (minimum: 1.5)");
+            $this->logger->info("❌ [RISK/REWARD] Risk/reward ratio too low: {$riskRewardRatio} (minimum: 1.5)");
             return;
         }
         
-        Log::info("✅ [SIGNAL] Risk/reward ratio acceptable, placing order...");
+        $this->logger->info("✅ [RISK/REWARD] Risk/reward ratio acceptable, placing order...");
         
         // Place the order
         $order = $this->placeOrder($signal, $positionSize);
@@ -337,10 +360,135 @@ class TradingBotService
             // Save signal
             $this->saveSignal($signal, $currentPrice, $stopLoss, $takeProfit, $riskRewardRatio);
             
-            Log::info("✅ [SIGNAL] Order placed successfully: {$order['order_id']}");
+            $this->logger->info("✅ [ORDER] Order placed successfully: {$order['order_id']}");
+            
+            // Set cooldown period after placing trade
+            $this->setCooldownPeriod();
+            $this->logger->info("⏰ [COOLDOWN] 3-hour cooldown period activated after placing trade");
         } else {
-            Log::error("❌ [SIGNAL] Failed to place order");
+            $this->logger->error("❌ [ORDER] Failed to place order");
         }
+    }
+
+    /**
+     * Calculate 10% position size based on signal direction and available balance
+     */
+    private function calculateTenPercentPositionSize(float $currentPrice, string $signalDirection = null): float
+    {
+        $assetSymbol = $this->extractAssetSymbol($this->bot->symbol);
+        
+        if ($signalDirection === 'bullish') {
+            // For bullish signals, calculate 10% of USDT balance
+            return $this->calculateBuyPositionSize($currentPrice);
+        } elseif ($signalDirection === 'bearish') {
+            // For bearish signals, calculate 10% of current asset holdings
+            $userHolding = $this->holdingsService->getCurrentHoldings($this->bot->user_id, $assetSymbol);
+            
+            if (!$userHolding || $userHolding->quantity <= 0) {
+                $this->logger->warning("No {$assetSymbol} holdings available for sell order");
+                return 0;
+            }
+            
+            $currentHoldings = $userHolding->quantity;
+            $this->logger->info("Current holdings for sell: {$currentHoldings} {$assetSymbol}");
+            
+            // Calculate 10% of current holdings
+            $tenPercentSize = $currentHoldings * 0.10;
+            $this->logger->info("10% sell position size: {$currentHoldings} * 0.10 = {$tenPercentSize} {$assetSymbol}");
+            
+            // Ensure minimum order size
+            $minOrderSize = $this->getMinimumOrderSize();
+            if ($tenPercentSize < $minOrderSize) {
+                $this->logger->info("Sell position size below minimum ({$minOrderSize}), using minimum: {$minOrderSize}");
+                $tenPercentSize = $minOrderSize;
+            }
+            
+            // Ensure we don't exceed current holdings
+            if ($tenPercentSize > $currentHoldings) {
+                $this->logger->info("Sell position size exceeds holdings, using current holdings: {$currentHoldings}");
+                $tenPercentSize = $currentHoldings;
+            }
+            
+            return $tenPercentSize;
+        } else {
+            // Fallback for unknown direction
+            $this->logger->warning("Unknown signal direction for position sizing");
+            return 0;
+        }
+        
+        return $tenPercentSize;
+    }
+
+    /**
+     * Calculate buy position size using USDT balance
+     */
+    private function calculateBuyPositionSize(float $currentPrice): float
+    {
+        $usdtBalance = $this->getUSDTBalance();
+        
+        $this->logger->info("USDT Balance calculation: USDT Balance = {$usdtBalance}, Current Price = {$currentPrice}");
+        
+        if ($usdtBalance <= 0) {
+            $this->logger->warning("No USDT balance available for buy order");
+            return 0;
+        }
+        
+        // Calculate 10% of USDT balance
+        $tenPercentUsdt = $usdtBalance * 0.10;
+        $positionSize = $tenPercentUsdt / $currentPrice;
+        
+        $this->logger->info("Buy position size calculation: 10% USDT = {$tenPercentUsdt} USDT, Position Size = {$positionSize}");
+        
+        // Apply maximum position size limit
+        $maxPositionSize = $this->bot->max_position_size;
+        if ($positionSize > $maxPositionSize) {
+            $positionSize = $maxPositionSize;
+            $this->logger->info("Position size limited by max position size: {$positionSize}");
+        }
+        
+        return $positionSize;
+    }
+
+    /**
+     * Extract asset symbol from trading pair (e.g., "BTC-USDT" -> "BTC")
+     */
+    private function extractAssetSymbol(string $tradingPair): string
+    {
+        return explode('-', $tradingPair)[0];
+    }
+
+    /**
+     * Check if we should buy the asset (bullish signal)
+     */
+    private function shouldBuyAsset(): bool
+    {
+        // This will be determined by the signal direction
+        return true; // Default to true, will be overridden by signal processing
+    }
+
+    /**
+     * Check if we should sell the asset (bearish signal)
+     */
+    private function shouldSellAsset(): bool
+    {
+        // This will be determined by the signal direction
+        return false; // Default to false, will be overridden by signal processing
+    }
+
+    /**
+     * Get minimum order size for the exchange
+     */
+    private function getMinimumOrderSize(): float
+    {
+        // Default minimum order sizes (can be configured per exchange)
+        $minSizes = [
+            'BTC' => 0.001,
+            'ETH' => 0.01,
+            'USDT' => 10,
+        ];
+        
+        $assetSymbol = $this->extractAssetSymbol($this->bot->symbol);
+        return $minSizes[$assetSymbol] ?? 0.001; // Default to 0.001
     }
 
     /**
@@ -348,59 +496,17 @@ class TradingBotService
      */
     private function handleExistingPosition(Trade $trade, array $signal, float $currentPrice): void
     {
+        $this->logger->info("📊 [EXISTING POSITION] Monitoring existing position: " . json_encode($trade->toArray()));
+        
         // Check if we should close the position
         $shouldClose = $this->shouldClosePosition($trade, $signal, $currentPrice);
         
         if ($shouldClose) {
+            $this->logger->info("🔴 [CLOSE] Position closing conditions met - closing position");
             $this->closePosition($trade, $currentPrice);
+        } else {
+            $this->logger->info("✅ [HOLD] Position conditions stable - continuing to monitor");
         }
-    }
-
-    /**
-     * Calculate position size based on risk management
-     */
-    private function calculatePositionSize(float $currentPrice): float
-    {
-        $balance = $this->exchangeService->getBalance();
-        $usdtBalance = 0;
-        
-        foreach ($balance as $bal) {
-            // Handle both Binance (asset) and KuCoin (currency) formats
-            $currency = $bal['currency'] ?? $bal['asset'] ?? null;
-            $available = $bal['available'] ?? $bal['free'] ?? 0;
-            
-            if ($currency === 'USDT' && $available > 0) {
-                $usdtBalance = (float) $available;
-                break;
-            }
-        }
-        
-        Log::info("Balance calculation: USDT Balance = {$usdtBalance}, Current Price = {$currentPrice}");
-        
-        if ($usdtBalance <= 0) {
-            Log::warning("No USDT balance available");
-            return 0;
-        }
-        
-        // Calculate position size based on risk percentage
-        $riskAmount = $usdtBalance * ($this->bot->risk_percentage / 100);
-        $positionSize = $riskAmount / $currentPrice;
-        
-        Log::info("Position size calculation: Risk Amount = {$riskAmount} USDT, Position Size = {$positionSize} BTC");
-        
-        // Apply maximum position size limit
-        $maxPositionSize = $this->bot->max_position_size;
-        if ($positionSize > $maxPositionSize) {
-            $positionSize = $maxPositionSize;
-            Log::info("Position size limited by max position size: {$positionSize}");
-        }
-        
-        // Check if position size is too small (likely below exchange minimum)
-        if ($positionSize < 0.001) {
-            Log::warning("Position size too small: {$positionSize} BTC. This may be below exchange minimum order size.");
-        }
-        
-        return $positionSize;
     }
 
     /**
@@ -422,7 +528,7 @@ class TradingBotService
             
             return $nearestSupport ? $nearestSupport['price'] : $currentPrice * 0.95;
         } else {
-            // For bearish signals, use a percentage below current price
+            // For bearish signals, use a percentage above current price
             return $currentPrice * 1.05;
         }
     }
@@ -459,6 +565,10 @@ class TradingBotService
         $risk = abs($entryPrice - $stopLoss);
         $reward = abs($takeProfit - $entryPrice);
         
+        if ($risk == 0) {
+            return 0;
+        }
+        
         return $reward / $risk;
     }
 
@@ -468,6 +578,8 @@ class TradingBotService
     private function placeOrder(array $signal, float $quantity): ?array
     {
         $side = $signal['direction'] === 'bullish' ? 'buy' : 'sell';
+        
+        $this->logger->info("📤 [ORDER] Placing {$side} order for {$quantity} {$this->bot->symbol}");
         
         return $this->exchangeService->placeMarketOrder(
             $this->bot->symbol,
@@ -481,7 +593,7 @@ class TradingBotService
      */
     private function saveTrade(array $signal, array $order, float $price, float $stopLoss, float $takeProfit): void
     {
-        Trade::create([
+        $trade = Trade::create([
             'trading_bot_id' => $this->bot->id,
             'exchange_order_id' => $order['order_id'],
             'side' => $order['side'],
@@ -496,6 +608,9 @@ class TradingBotService
             'take_profit' => $takeProfit,
             'notes' => json_encode($signal)
         ]);
+        
+        // Update asset holdings after trade
+        $this->holdingsService->updateHoldingsAfterTrade($trade);
     }
 
     /**
@@ -540,25 +655,33 @@ class TradingBotService
     {
         // Check stop loss
         if ($trade->side === 'buy' && $currentPrice <= $trade->stop_loss) {
+            $this->logger->info("🔴 [STOP LOSS] Stop loss triggered for buy position at {$currentPrice}");
             return true;
         }
         
         if ($trade->side === 'sell' && $currentPrice >= $trade->stop_loss) {
+            $this->logger->info("🔴 [STOP LOSS] Stop loss triggered for sell position at {$currentPrice}");
             return true;
         }
         
         // Check take profit
         if ($trade->side === 'buy' && $currentPrice >= $trade->take_profit) {
+            $this->logger->info("🟢 [TAKE PROFIT] Take profit triggered for buy position at {$currentPrice}");
             return true;
         }
         
         if ($trade->side === 'sell' && $currentPrice <= $trade->take_profit) {
+            $this->logger->info("🟢 [TAKE PROFIT] Take profit triggered for sell position at {$currentPrice}");
             return true;
         }
         
-        // Check for opposite signal
+        // Check for opposite signal (optional - can be disabled for longer holds)
         if ($signal['direction'] !== ($trade->side === 'buy' ? 'bullish' : 'bearish')) {
-            return true;
+            $this->logger->info("🔄 [OPPOSITE SIGNAL] Opposite signal detected - considering position closure");
+            // Only close on opposite signal if it's also strong (70%+)
+            if (($signal['strength'] ?? 0) >= 0.70) {
+                return true;
+            }
         }
         
         return false;
@@ -569,6 +692,8 @@ class TradingBotService
      */
     private function closePosition(Trade $trade, float $currentPrice): void
     {
+        $this->logger->info("🔴 [CLOSE POSITION] Starting position closure for trade ID: {$trade->id}");
+        
         $side = $trade->side === 'buy' ? 'sell' : 'buy';
         
         $order = $this->exchangeService->placeMarketOrder(
@@ -592,7 +717,74 @@ class TradingBotService
                 'profit_loss_percentage' => $profitLossPercentage
             ]);
             
-            Log::info("Position closed: P&L = {$profitLoss} ({$profitLossPercentage}%)");
+            $this->logger->info("✅ [CLOSE POSITION] Position closed successfully: P&L = {$profitLoss} ({$profitLossPercentage}%)");
+            
+            // Set cooldown period after closing position
+            $this->setCooldownPeriod();
+            $this->logger->info("⏰ [COOLDOWN] 3-hour cooldown period activated after closing position");
+        } else {
+            $this->logger->error("❌ [CLOSE POSITION] Failed to close position on exchange");
         }
+    }
+
+    /**
+     * Set cooldown period after placing or closing a position
+     */
+    private function setCooldownPeriod(): void
+    {
+        $this->bot->update([
+            'last_trade_at' => now(),
+        ]);
+    }
+
+    /**
+     * Check if bot is in cooldown period (3 hours)
+     */
+    private function isInCooldownPeriod(): bool
+    {
+        if (!$this->bot->last_trade_at) {
+            return false;
+        }
+        
+        $cooldownHours = 3; // 3-hour cooldown as requested
+        $cooldownEnd = $this->bot->last_trade_at->addHours($cooldownHours);
+        
+        $isInCooldown = now()->lt($cooldownEnd);
+        
+        if ($isInCooldown) {
+            $remainingMinutes = now()->diffInMinutes($cooldownEnd);
+            $this->logger->info("⏰ [COOLDOWN] Bot is in cooldown period - {$remainingMinutes} minutes remaining");
+        }
+        
+        return $isInCooldown;
+    }
+
+    /**
+     * Sync assets with the exchange to get the latest holdings and USDT balance.
+     */
+    private function syncAssetsWithExchange(): void
+    {
+        $this->logger->info("🔄 [ASSET SYNC] Syncing assets with exchange for user ID: {$this->bot->user_id}");
+        $this->holdingsService->syncAssetsWithExchange($this->bot->user_id);
+        $this->logger->info("✅ [ASSET SYNC] Asset synchronization complete.");
+    }
+
+    /**
+     * Get the current USDT balance from the exchange.
+     */
+    private function getUSDTBalance(): float
+    {
+        $this->logger->info("💰 [USDT BALANCE] Fetching current USDT balance from exchange for user ID: {$this->bot->user_id}");
+        $balance = $this->exchangeService->getBalance();
+        $usdtBalance = 0;
+        foreach ($balance as $bal) {
+            $currency = $bal['currency'] ?? $bal['asset'] ?? null;
+            if ($currency === 'USDT') {
+                $usdtBalance = (float) ($bal['available'] ?? $bal['free'] ?? 0);
+                break;
+            }
+        }
+        $this->logger->info("💰 [USDT BALANCE] Current USDT balance: {$usdtBalance}");
+        return $usdtBalance;
     }
 }
