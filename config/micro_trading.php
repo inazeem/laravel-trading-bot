@@ -14,12 +14,12 @@ return [
     // Candle limits for each timeframe (optimized for micro trading)
     'candle_limits' => [
         '1m' => 60,    // 1 hour of data
-        '5m' => 48,    // 4 hours of data  
-        '15m' => 32,   // 8 hours of data
-        '30m' => 24,   // 12 hours of data
-        '1h' => 24,    // 1 day of data
-        '4h' => 30,    // 5 days of data
-        '1d' => 30     // 1 month of data
+        '5m' => 60,    // 5 hours of data  
+        '15m' => 60,   // 15 hours of data
+        '30m' => 48,   // 24 hours of data
+        '1h' => 48,    // 2 days of data
+        '4h' => 60,    // 10 days of data
+        '1d' => 60     // 2 months of data
     ],
 
     // Market trend analysis settings

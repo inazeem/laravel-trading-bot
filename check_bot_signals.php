@@ -103,7 +103,7 @@ try {
         
         // Analyze with SMC service
         $smcService = new SmartMoneyConceptsService($candles);
-        $signals = $smcService->analyzeCandles($candles, $timeframe, $currentPrice);
+        $signals = $smcService->generateSignals($currentPrice);
         
         if (!empty($signals)) {
             echo "   🎯 Generated " . count($signals) . " signals:\n";
