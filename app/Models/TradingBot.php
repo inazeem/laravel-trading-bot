@@ -20,6 +20,7 @@ class TradingBot extends Model
         'timeframes',
         'strategy_settings',
         'last_run_at',
+        'last_trade_at',
         'status'
     ];
 
@@ -28,6 +29,7 @@ class TradingBot extends Model
         'timeframes' => 'array',
         'strategy_settings' => 'array',
         'last_run_at' => 'datetime',
+        'last_trade_at' => 'datetime',
     ];
 
     public function trades(): HasMany

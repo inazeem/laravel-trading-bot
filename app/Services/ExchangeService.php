@@ -531,7 +531,18 @@ class ExchangeService
 
     private function getBinanceBalance()
     {
-        $timestamp = round(microtime(true) * 1000);
+        // First get server time to sync timestamp
+        $serverTimeResponse = Http::get('https://api.binance.com/api/v3/time');
+        $serverTime = 0;
+        
+        if ($serverTimeResponse->successful()) {
+            $serverData = $serverTimeResponse->json();
+            $serverTime = $serverData['serverTime'] ?? 0;
+        }
+        
+        // Use server time if available, otherwise use local time with adjustment
+        $timestamp = $serverTime > 0 ? $serverTime : (round(microtime(true) * 1000) - 2000);
+        
         $endpoint = '/api/v3/account';
         
         $params = [
@@ -542,14 +553,31 @@ class ExchangeService
         $signature = hash_hmac('sha256', $queryString, $this->secretKey);
         $params['signature'] = $signature;
         
+        Log::info("Making Binance API request to: {$endpoint}");
+        Log::info("API Key: " . substr($this->apiKey, 0, 10) . "...");
+        Log::info("Timestamp: {$timestamp} (server time: {$serverTime})");
+        
         $response = Http::withHeaders([
             'X-MBX-APIKEY' => $this->apiKey
         ])->get('https://api.binance.com' . $endpoint, $params);
         
+        Log::info("Binance API response status: " . $response->status());
+        Log::info("Binance API response body: " . $response->body());
+        
         if ($response->successful()) {
-            return $response->json()['balances'];
+            $data = $response->json();
+            Log::info("Binance API response data: " . json_encode($data));
+            
+            if (isset($data['balances'])) {
+                Log::info("Found " . count($data['balances']) . " balance entries");
+                return $data['balances'];
+            } else {
+                Log::error("No 'balances' key found in Binance response");
+                return [];
+            }
         }
         
+        Log::error("Binance API request failed: " . $response->body());
         return [];
     }
 

@@ -14,6 +14,60 @@ class TradingBotController extends Controller
     public function index()
     {
         $bots = auth()->user()->tradingBots()->withCount(['trades', 'signals'])->latest()->paginate(10);
+        
+        // Get asset holdings and USDT balance for each bot
+        $assetHoldingsService = new \App\Services\AssetHoldingsService();
+        
+        foreach ($bots as $bot) {
+            // Get asset symbol from trading pair
+            $assetSymbol = explode('-', $bot->symbol)[0];
+            
+            // Get asset holdings
+            $assetHolding = $assetHoldingsService->getCurrentHoldings($bot->user_id, $assetSymbol);
+            $bot->asset_quantity = $assetHolding ? $assetHolding->quantity : 0;
+            $bot->asset_average_price = $assetHolding ? $assetHolding->average_buy_price : 0;
+            
+            // Sync assets with exchange using bot's API key
+            try {
+                $apiKey = $bot->apiKey;
+                if ($apiKey) {
+                    $assetHoldingsService->syncAssetsWithExchange($bot->user_id, $apiKey);
+                    // Re-fetch holdings after sync
+                    $assetHolding = $assetHoldingsService->getCurrentHoldings($bot->user_id, $assetSymbol);
+                    $bot->asset_quantity = $assetHolding ? $assetHolding->quantity : 0;
+                    $bot->asset_average_price = $assetHolding ? $assetHolding->average_buy_price : 0;
+                }
+            } catch (\Exception $e) {
+                // Continue with existing holdings if sync fails
+            }
+            
+            // Get USDT balance using bot's API key
+            try {
+                // Get the API key associated with this bot
+                $apiKey = $bot->apiKey;
+                if ($apiKey) {
+                    $exchangeService = new \App\Services\ExchangeService($apiKey);
+                    $balances = $exchangeService->getBalance();
+                    $usdtBalance = 0;
+                    foreach ($balances as $balance) {
+                        $currency = $balance['currency'] ?? $balance['asset'] ?? null;
+                        if ($currency === 'USDT') {
+                            $usdtBalance = (float) ($balance['available'] ?? $balance['free'] ?? 0);
+                            break;
+                        }
+                    }
+                    $bot->usdt_balance = $usdtBalance;
+                } else {
+                    $bot->usdt_balance = 0;
+                }
+            } catch (\Exception $e) {
+                $bot->usdt_balance = 0;
+            }
+            
+            // Get current asset price (you might want to implement this)
+            $bot->current_price = 0; // Placeholder - implement price fetching
+        }
+        
         return view('trading-bots.index', compact('bots'));
     }
 
@@ -241,5 +295,29 @@ class TradingBotController extends Controller
         });
         
         return round(($winningTrades->count() / $closedTrades->count()) * 100, 2);
+    }
+
+    public function refreshAssets(TradingBot $tradingBot)
+    {
+        // Ensure user can only refresh assets for their own bots
+        if ($tradingBot->user_id !== auth()->id()) {
+            abort(403);
+        }
+        
+        try {
+            // Sync assets with exchange using bot's API key
+            $assetHoldingsService = new \App\Services\AssetHoldingsService();
+            $apiKey = $tradingBot->apiKey;
+            
+            if ($apiKey) {
+                $assetHoldingsService->syncAssetsWithExchange($tradingBot->user_id, $apiKey);
+                return redirect()->back()->with('success', 'Assets refreshed successfully. Holdings and USDT balance updated.');
+            } else {
+                return redirect()->back()->with('error', 'No API key found for this bot.');
+            }
+        } catch (\Exception $e) {
+            Log::error('Error refreshing assets: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Failed to refresh assets: ' . $e->getMessage());
+        }
     }
 }
