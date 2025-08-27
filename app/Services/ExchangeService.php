@@ -1241,60 +1241,120 @@ class ExchangeService
     }
 
     /**
-     * Close Binance futures position
+     * Close Binance futures position - FIXED VERSION
      */
     private function closeBinanceFuturesPosition($symbol, $side, $quantity, $orderId = null)
     {
-        // Get server time from Binance to ensure timestamp accuracy
-        $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
-        if ($serverTimeResponse->successful()) {
-            $serverTime = $serverTimeResponse->json()['serverTime'];
-            $timestamp = $serverTime;
-        } else {
-            $timestamp = round(microtime(true) * 1000);
-        }
-        
-        $endpoint = '/fapi/v1/order';
-        
-        // Normalize symbol for Binance (remove dash)
-        $binanceSymbol = str_replace('-', '', $symbol);
-        
-        // For closing positions, we need to reverse the side
-        $closeSide = $side === 'long' ? 'SELL' : 'BUY';
-        
-        $params = [
-            'symbol' => $binanceSymbol,
-            'side' => $closeSide,
-            'type' => 'MARKET',
-            'quantity' => round($quantity, 1), // Round to 1 decimal place for SUI
-            'timestamp' => (int)$timestamp
-        ];
-        
-        $queryString = http_build_query($params);
-        $signature = hash_hmac('sha256', $queryString, $this->secretKey);
-        $params['signature'] = $signature;
-        
-        Log::info("Closing Binance futures position: " . json_encode($params));
-        
-        $response = Http::withHeaders([
-            'X-MBX-APIKEY' => $this->apiKey
-        ])->asForm()->post('https://fapi.binance.com' . $endpoint, $params);
-        
-        Log::info("Binance futures close position response: " . $response->body());
-        
-        if ($response->successful()) {
-            $data = $response->json();
-            return [
-                'order_id' => $data['orderId'],
-                'symbol' => $symbol,
+        try {
+            // First, get the actual position size from exchange to ensure accuracy
+            $actualPosition = $this->getActualPositionSize($symbol, $side);
+            if ($actualPosition) {
+                $quantity = $actualPosition['size'];
+                Log::info("📊 [CLOSE] Using actual position size from exchange: {$quantity}");
+            } else {
+                Log::warning("⚠️ [CLOSE] Could not get actual position size, using provided: {$quantity}");
+            }
+            
+            // Get server time from Binance to ensure timestamp accuracy
+            $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
+            if ($serverTimeResponse->successful()) {
+                $serverTime = $serverTimeResponse->json()['serverTime'];
+                $timestamp = $serverTime;
+            } else {
+                $timestamp = round(microtime(true) * 1000);
+            }
+            
+            $endpoint = '/fapi/v1/order';
+            
+            // Normalize symbol for Binance (remove dash)
+            $binanceSymbol = str_replace('-', '', $symbol);
+            
+            // For closing positions, we need to reverse the side
+            $closeSide = $side === 'long' ? 'SELL' : 'BUY';
+            
+            // Get appropriate precision for this symbol
+            $precision = $this->getFuturesQuantityPrecision($binanceSymbol);
+            
+            $params = [
+                'symbol' => $binanceSymbol,
                 'side' => $closeSide,
-                'quantity' => $quantity,
-                'status' => $data['status']
+                'type' => 'MARKET',
+                'quantity' => round($quantity, $precision),
+                'reduceOnly' => 'true', // CRITICAL: This tells Binance we're closing a position
+                'timestamp' => (int)$timestamp
             ];
+            
+            $queryString = http_build_query($params);
+            $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+            $params['signature'] = $signature;
+            
+            Log::info("🔴 [CLOSE] Closing Binance futures position: " . json_encode($params));
+            
+            $response = Http::withHeaders([
+                'X-MBX-APIKEY' => $this->apiKey
+            ])->asForm()->post('https://fapi.binance.com' . $endpoint, $params);
+            
+            Log::info("📋 [CLOSE] Binance futures close position response: " . $response->body());
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                Log::info("✅ [CLOSE] Position closed successfully: Order ID {$data['orderId']}");
+                return [
+                    'order_id' => $data['orderId'],
+                    'symbol' => $symbol,
+                    'side' => $closeSide,
+                    'quantity' => $quantity,
+                    'status' => $data['status']
+                ];
+            }
+            
+            $errorData = $response->json();
+            Log::error("❌ [CLOSE] Binance futures close position failed: " . $response->body());
+            
+            // Handle specific error codes
+            if (isset($errorData['code'])) {
+                switch ($errorData['code']) {
+                    case -2019:
+                        throw new \Exception("Insufficient margin to close position. This usually means the position was already closed or doesn't exist.");
+                    case -2021:
+                        throw new \Exception("Order would immediately trigger. Check position side and quantity.");
+                    case -1111:
+                        throw new \Exception("Invalid quantity precision. Expected {$precision} decimal places.");
+                    default:
+                        throw new \Exception("Binance error {$errorData['code']}: {$errorData['msg']}");
+                }
+            }
+            
+            throw new \Exception("Binance futures close position failed: " . $response->body());
+            
+        } catch (\Exception $e) {
+            Log::error("❌ [CLOSE] Exception in closeBinanceFuturesPosition: " . $e->getMessage());
+            throw $e;
         }
-        
-        Log::error("Binance futures close position failed: " . $response->body());
-        throw new \Exception("Binance futures close position failed: " . $response->body());
+    }
+    
+    /**
+     * Get actual position size from exchange for accurate closing
+     */
+    private function getActualPositionSize($symbol, $side): ?array
+    {
+        try {
+            $positions = $this->getOpenPositions($symbol);
+            
+            foreach ($positions as $position) {
+                if ($position['side'] === $side && $position['quantity'] > 0) {
+                    return [
+                        'size' => $position['quantity'],
+                        'unrealized_pnl' => $position['unrealized_pnl']
+                    ];
+                }
+            }
+            
+            return null;
+        } catch (\Exception $e) {
+            Log::warning("⚠️ [POSITION SIZE] Could not get actual position size: " . $e->getMessage());
+            return null;
+        }
     }
 
     /**

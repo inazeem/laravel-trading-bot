@@ -256,8 +256,8 @@ class FuturesTradingBotService
         foreach ($signals as $index => $signal) {
             $this->logger->info("🔍 [FILTER] Processing signal {$index}: " . json_encode($signal));
             
-            // CRITICAL REQUIREMENT: Only accept signals with strength above 90%
-            $requiredStrength = config('micro_trading.signal_settings.high_strength_requirement', 0.90); // 90% strength requirement
+            // OPTIMIZATION #3: Reduced minimum strength for more trading opportunities (40% vs 50%)
+            $requiredStrength = config('micro_trading.signal_settings.min_strength_threshold', 0.40); // 40% strength requirement for more signals
             $signalStrength = $signal['strength'] ?? 0;
             
             if ($signalStrength < $requiredStrength) {
@@ -272,7 +272,8 @@ class FuturesTradingBotService
             $this->logger->info("🔗 [FILTER] Signal {$index} confluence: {$confluence}");
             
             // For high-strength signals (90%+), we can be more flexible with confluence
-            $minConfluence = 1; // Minimum confluence requirement for 90%+ strength signals
+            // If only one timeframe is configured, allow signals without confluence
+            $minConfluence = count($this->bot->timeframes) > 1 ? 1 : 0; // Allow single timeframe signals
             
             if ($confluence >= $minConfluence) {
                 $signal['confluence'] = $confluence;
@@ -545,22 +546,40 @@ class FuturesTradingBotService
         
         $this->logger->info("Position size calculation: Risk Amount = {$riskAmount} USDT, Leverage = {$this->bot->leverage}x, Position Size = {$positionSize}");
         
-        // Apply maximum position size limit
+        // Apply position sizing rules - USER'S MAX POSITION SIZE IS ABSOLUTE!
         $maxPositionSize = $this->bot->max_position_size;
+        $minNotionalValue = $this->bot->min_order_value + 0.5;
+        $requiredMinPosition = $minNotionalValue / $currentPrice;
+        
+        $this->logger->info("📏 [POSITION LIMITS] User's max position: {$maxPositionSize}, Exchange min position needed: {$requiredMinPosition}");
+        
+        // Step 1: Check if user's max position meets exchange minimum requirements
+        $maxPositionNotional = $maxPositionSize * $currentPrice;
+        if ($maxPositionNotional < $minNotionalValue) {
+            $this->logger->error("❌ [CONFIG ERROR] User's max_position_size ({$maxPositionSize}) creates notional value ({$maxPositionNotional} USDT) below exchange minimum ({$minNotionalValue} USDT)");
+            $this->logger->error("❌ [TRADE SKIPPED] Please increase max_position_size to at least " . ceil($requiredMinPosition) . " to enable trading");
+            return 0;
+        }
+        
+        // Step 2: Apply user's max position size limit (absolute rule)
         if ($positionSize > $maxPositionSize) {
+            $this->logger->info("📏 [MAX POSITION] Risk-based position {$positionSize} exceeds user's max position {$maxPositionSize} - capping to user's limit");
             $positionSize = $maxPositionSize;
-            $this->logger->info("Position size limited by max position size: {$positionSize}");
         }
         
-        // Ensure minimum notional value from bot configuration
-        $minNotionalValue = $this->bot->min_order_value + 0.5; // Add small buffer for rounding
-        $currentNotional = $positionSize * $currentPrice;
-        
-        if ($currentNotional < $minNotionalValue) {
-            $minPositionSize = ceil(($minNotionalValue / $currentPrice) * 10) / 10; // Round up to nearest 0.1
-            $this->logger->info("Position notional below minimum ({$currentNotional} USDT), adjusting position size from {$positionSize} to {$minPositionSize} (min order value: {$this->bot->min_order_value} USDT)");
-            $positionSize = $minPositionSize;
+        // Step 3: Ensure position meets exchange minimum (but never exceed user's max)
+        if ($positionSize < $requiredMinPosition) {
+            if ($requiredMinPosition <= $maxPositionSize) {
+                $this->logger->info("📏 [MIN NOTIONAL] Increasing position from {$positionSize} to {$requiredMinPosition} to meet exchange minimum");
+                $positionSize = $requiredMinPosition;
+            } else {
+                // This should never happen due to Step 1 check, but just in case
+                $this->logger->error("❌ [IMPOSSIBLE] Exchange minimum exceeds user's maximum - this should have been caught earlier");
+                return 0;
+            }
         }
+        
+        $this->logger->info("✅ [FINAL POSITION] Position size: {$positionSize} (within user's limit of {$maxPositionSize}, meets exchange minimum)");
         
         return $positionSize;
     }
@@ -1299,10 +1318,10 @@ class FuturesTradingBotService
         return false;
     }
 
-    /**
-     * Close position - IMPROVED VERSION
+        /**
+     * Close position - IMPROVED VERSION WITH MARGIN ERROR HANDLING
      */
-    public function closePosition(FuturesTrade $trade, float $currentPrice): void
+public function closePosition(FuturesTrade $trade, float $currentPrice): void
     {
         try {
             $this->logger->info("🔴 [CLOSE POSITION] Starting position closure for trade ID: {$trade->id}");
@@ -1316,19 +1335,23 @@ class FuturesTradingBotService
             // Save to persistent storage
             $this->savePersistentPnL($trade->id, $finalPnL);
             
-            $side = $trade->isLong() ? 'sell' : 'buy';
+            // Check if position actually exists on exchange before trying to close
+            $exchangePositions = $this->exchangeService->getOpenPositions($trade->symbol);
+            $positionExists = false;
             
-            $orderResult = $this->exchangeService->closeFuturesPosition(
-                $trade->symbol,
-                $side,
-                $trade->quantity,
-                $trade->order_id
-            );
+            foreach ($exchangePositions as $position) {
+                $dbSymbol = str_replace('USDT', '-USDT', $position['symbol']);
+                if ($dbSymbol === $trade->symbol && $position['side'] === $trade->side) {
+                    $positionExists = true;
+                    $this->logger->info("✅ [CLOSE POSITION] Confirmed position exists on exchange");
+                    break;
+                }
+            }
             
-            if ($orderResult) {
-                $this->logger->info("✅ [CLOSE POSITION] Position closed successfully on exchange");
+            if (!$positionExists) {
+                $this->logger->warning("⚠️ [CLOSE POSITION] Position no longer exists on exchange - marking as closed");
                 
-                // Update trade with final PnL
+                // Update trade as closed since position doesn't exist on exchange
                 $trade->update([
                     'exit_price' => $currentPrice,
                     'realized_pnl' => $finalPnL,
@@ -1337,20 +1360,77 @@ class FuturesTradingBotService
                     'closed_at' => now(),
                 ]);
                 
-                $this->logger->info("💾 [CLOSE POSITION] Trade updated in database with final PnL");
-                
-                // Set cooldown period after closing position
+                $this->logger->info("💾 [CLOSE POSITION] Trade marked as closed (position already closed on exchange)");
                 $this->setCooldownPeriod();
+                return;
+            }
+            
+            // Attempt to close position on exchange
+            $side = $trade->side; // Use the actual trade side (long/short)
+            
+            try {
+                $orderResult = $this->exchangeService->closeFuturesPosition(
+                    $trade->symbol,
+                    $side,
+                    $trade->quantity,
+                    $trade->order_id
+                );
                 
-                $this->logger->info("⏰ [COOLDOWN] Cooldown period activated - no new positions for 30 minutes");
-            } else {
-                $this->logger->error("❌ [CLOSE POSITION] Failed to close position on exchange");
+                if ($orderResult) {
+                    $this->logger->info("✅ [CLOSE POSITION] Position closed successfully on exchange");
+                    
+                    // Update trade with final PnL
+                    $trade->update([
+                        'exit_price' => $currentPrice,
+                        'realized_pnl' => $finalPnL,
+                        'pnl_percentage' => $pnlPercentage,
+                        'status' => 'closed',
+                        'closed_at' => now(),
+                    ]);
+                    
+                    $this->logger->info("💾 [CLOSE POSITION] Trade updated in database with final PnL");
+                    
+                    // Set cooldown period after closing position
+                    $this->setCooldownPeriod();
+                    
+                    $this->logger->info("⏰ [COOLDOWN] Cooldown period activated - no new positions for 30 minutes");
+                } else {
+                    $this->logger->error("❌ [CLOSE POSITION] Failed to close position on exchange");
+                    
+                    // Even if exchange close fails, update with current PnL for tracking
+                    $trade->update([
+                        'unrealized_pnl' => $finalPnL,
+                        'pnl_percentage' => $pnlPercentage,
+                    ]);
+                }
                 
-                // Even if exchange close fails, update with current PnL for tracking
-                $trade->update([
-                    'unrealized_pnl' => $finalPnL,
-                    'pnl_percentage' => $pnlPercentage,
-                ]);
+            } catch (\Exception $closeError) {
+                $this->logger->error("❌ [CLOSE POSITION] Exception during close: " . $closeError->getMessage());
+                
+                // Handle specific margin insufficient error
+                if (strpos($closeError->getMessage(), 'Insufficient margin') !== false) {
+                    $this->logger->warning("⚠️ [MARGIN ERROR] Position may have been already closed by stop loss or liquidation");
+                    
+                    // Mark position as closed since it likely doesn't exist anymore
+                    $trade->update([
+                        'exit_price' => $currentPrice,
+                        'realized_pnl' => $finalPnL,
+                        'pnl_percentage' => $pnlPercentage,
+                        'status' => 'closed',
+                        'closed_at' => now(),
+                    ]);
+                    
+                    $this->logger->info("💾 [MARGIN ERROR] Position marked as closed due to margin error");
+                    $this->setCooldownPeriod();
+                } else {
+                    // For other errors, just update PnL but keep position open
+                    $trade->update([
+                        'unrealized_pnl' => $finalPnL,
+                        'pnl_percentage' => $pnlPercentage,
+                    ]);
+                    
+                    $this->logger->error("🔄 [RETRY] Will retry closing position on next run");
+                }
             }
         } catch (\Exception $e) {
             $this->logger->error("❌ [CLOSE POSITION] Error closing position: " . $e->getMessage());

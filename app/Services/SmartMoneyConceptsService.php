@@ -350,14 +350,21 @@ class SmartMoneyConceptsService
      */
     private function calculateSignalScore(array $block, array $trend, float $currentPrice): float
     {
-        $score = $block['strength']; // Base score from order block strength
+        // CRITICAL FIX: Ensure block strength is normalized first
+        $baseStrength = $block['strength'];
+        if ($baseStrength > 1.0) {
+            \Log::warning("🐛 [SIGNAL BUG] Detected unnormalized block strength: {$baseStrength} - fixing");
+            $baseStrength = min(1.0, max(0.0, log10($baseStrength + 1) / 10));
+        }
+        
+        $score = $baseStrength; // Base score from order block strength
         
         // Factor 1: Trend alignment (boost if aligned, slight penalty if against)
         $trendAlignment = ($trend['direction'] === $block['type']) ? 1.2 : 0.9;
         $score *= $trendAlignment;
         
         // Factor 2: Trend strength (stronger trends give more weight to alignment)
-        $trendWeight = 1 + ($trend['strength'] * 0.5); // Max 1.5x boost for very strong trends
+        $trendWeight = 1 + (min(1.0, $trend['strength']) * 0.5); // Ensure trend strength is also capped
         if ($trend['direction'] === $block['type']) {
             $score *= $trendWeight;
         }
@@ -373,7 +380,11 @@ class SmartMoneyConceptsService
         $sizeBonus = 1 + min(0.3, $blockSize * 10); // Max 30% bonus for large blocks
         $score *= $sizeBonus;
         
-        return min(1.0, $score); // Cap at 1.0
+        $finalScore = min(1.0, max(0.0, $score)); // Ensure final score is 0-1
+        
+        \Log::info("📊 [SIGNAL SCORE] Block strength: {$block['strength']} -> Base: {$baseStrength} -> Final: {$finalScore}");
+        
+        return $finalScore;
     }
     
     /**

@@ -11,15 +11,15 @@ return [
     |
     */
 
-    // Candle limits for each timeframe (optimized for micro trading)
+    // Candle limits for each timeframe (optimized for ultra-fast micro trading)
     'candle_limits' => [
-        '1m' => 60,    // 1 hour of data
-        '5m' => 60,    // 5 hours of data  
-        '15m' => 60,   // 15 hours of data
-        '30m' => 48,   // 24 hours of data
-        '1h' => 48,    // 2 days of data
-        '4h' => 60,    // 10 days of data
-        '1d' => 60     // 2 months of data
+        '1m' => 60,    // 1 hour - Recent price action only
+        '5m' => 48,    // 4 hours - Short-term momentum  
+        '15m' => 32,   // 8 hours - Medium-term structure
+        '30m' => 24,   // 12 hours - Daily session analysis
+        '1h' => 24,    // 1 day - Daily trend analysis
+        '4h' => 30,    // 5 days - Weekly structure
+        '1d' => 30     // 1 month - Monthly overview
     ],
 
     // Market trend analysis settings
@@ -28,11 +28,11 @@ return [
         'swing_detection_length' => 3,  // Swing point detection sensitivity
     ],
 
-    // Signal generation settings for micro trading
+    // Signal generation settings for micro trading (OPTIMIZATION #3)
     'signal_settings' => [
-        'min_strength_threshold' => 0.4,  // Lower threshold for more signals
+        'min_strength_threshold' => 0.4,  // Reduced from 0.5 to 0.4 for more signals
         'high_strength_requirement' => 0.70,  // 70% strength requirement for trade placement (reduced from 90%)
-        'min_confluence' => 1,  // Single timeframe confirmation for faster signals
+        'min_confluence' => 1,  // Single timeframe confirmation for faster execution
         'max_trade_duration_hours' => 2,  // Maximum trade duration
     ],
 
@@ -51,8 +51,9 @@ return [
         'max_concurrent_analysis' => 3,  // Maximum concurrent timeframe analysis
     ],
 
-    // Recommended timeframes for micro trading
+    // Recommended timeframes for ultra-fast micro trading
     'recommended_timeframes' => [
+        'ultra_fast' => ['1m', '5m', '15m'],  // Ultra-fast timeframes for immediate signals
         'primary' => ['5m', '15m'],  // Primary timeframes for signal generation
         'secondary' => ['1h'],  // Secondary timeframe for confirmation
         'avoid' => ['1d', '4h'],  // Avoid longer timeframes for micro trading
