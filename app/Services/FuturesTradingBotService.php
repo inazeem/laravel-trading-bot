@@ -256,8 +256,8 @@ class FuturesTradingBotService
         foreach ($signals as $index => $signal) {
             $this->logger->info("🔍 [FILTER] Processing signal {$index}: " . json_encode($signal));
             
-            // OPTIMIZATION #3: Reduced minimum strength for more trading opportunities (40% vs 50%)
-            $requiredStrength = config('micro_trading.signal_settings.min_strength_threshold', 0.40); // 40% strength requirement for more signals
+            // HIGH-PRECISION: Use strongest signals only for maximum profitability (70% minimum)
+            $requiredStrength = config('micro_trading.signal_settings.high_strength_requirement', 0.90); // 90% strength requirement for absolute strongest signals
             $signalStrength = $signal['strength'] ?? 0;
             
             if ($signalStrength < $requiredStrength) {

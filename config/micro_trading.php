@@ -11,7 +11,7 @@ return [
     |
     */
 
-    // Candle limits for each timeframe (optimized for ultra-fast micro trading)
+    // Candle limits for each timeframe (optimized for ultra-fast micro trading)botoptimisation
     'candle_limits' => [
         '1m' => 60,    // 1 hour - Recent price action only
         '5m' => 48,    // 4 hours - Short-term momentum  
@@ -28,20 +28,20 @@ return [
         'swing_detection_length' => 3,  // Swing point detection sensitivity
     ],
 
-    // Signal generation settings for micro trading (OPTIMIZATION #3)
+    // Signal generation settings for HIGH-PRECISION trading
     'signal_settings' => [
-        'min_strength_threshold' => 0.4,  // Reduced from 0.5 to 0.4 for more signals
-        'high_strength_requirement' => 0.70,  // 70% strength requirement for trade placement (reduced from 90%)
+        'min_strength_threshold' => 0.7,  // 70% - Strong signals only (quality over quantity)
+        'high_strength_requirement' => 0.90,  // 90% - Absolute strongest signals for 5:1 R/R
         'min_confluence' => 1,  // Single timeframe confirmation for faster execution
-        'max_trade_duration_hours' => 2,  // Maximum trade duration
+        'max_trade_duration_hours' => 4,  // Longer duration for 7.5% take profit targets
     ],
 
-    // Risk management for micro trading
+    // Risk management for HIGH-PRECISION trading
     'risk_management' => [
-        'default_stop_loss_percentage' => 1.5,  // Tighter stop loss for micro trading
-        'default_take_profit_percentage' => 3.0,  // 2:1 risk/reward ratio
+        'default_stop_loss_percentage' => 1.5,  // Tight stop loss for precision control
+        'default_take_profit_percentage' => 7.5,  // 5:1 risk/reward ratio for maximum profitability
         'max_position_size' => 0.01,  // Smaller position sizes for micro trading
-        'min_risk_reward_ratio' => 1.5,  // Minimum risk/reward ratio
+        'min_risk_reward_ratio' => 5.0,  // 5:1 minimum risk/reward ratio for strongest signals
     ],
 
     // Performance optimization
