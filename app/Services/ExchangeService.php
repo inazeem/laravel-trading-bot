@@ -25,6 +25,24 @@ class ExchangeService
     }
 
     /**
+     * Map a spot-style symbol (e.g., BTC-USDT) to KuCoin futures contract code (e.g., XBTUSDTM)
+     */
+    private function mapToKuCoinFuturesSymbol(string $symbol): string
+    {
+        // Handle common base renames BTC -> XBT for KuCoin futures
+        $parts = explode('-', strtoupper($symbol));
+        $base = $parts[0] ?? $symbol;
+        $quote = $parts[1] ?? 'USDT';
+
+        if ($base === 'BTC') {
+            $base = 'XBT';
+        }
+
+        // Perpetual contracts typically end with 'M' for USDT margined on KuCoin Futures
+        return $base . $quote . 'M';
+    }
+
+    /**
      * Get available trading pairs from the exchange
      */
     public function getTradingPairs()
