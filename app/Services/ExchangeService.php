@@ -295,13 +295,33 @@ class ExchangeService
 
     private function getKuCoinPrice($symbol)
     {
-        $response = Http::get("https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={$symbol}");
-        
+        // Try futures ticker first using mapped futures symbol
+        try {
+            $futuresSymbol = $this->mapToKuCoinFuturesSymbol($symbol);
+            $futuresUrl = 'https://api-futures.kucoin.com/api/v1/ticker?symbol=' . urlencode($futuresSymbol);
+            Log::info("Fetching KuCoin Futures ticker: {$futuresUrl}");
+            $futuresResponse = Http::get($futuresUrl);
+            if ($futuresResponse->successful()) {
+                $data = $futuresResponse->json();
+                if (isset($data['data']['price'])) {
+                    return (float)$data['data']['price'];
+                }
+            }
+            Log::warning("KuCoin Futures ticker failed for {$futuresSymbol}. Response: " . $futuresResponse->body());
+        } catch (\Exception $e) {
+            Log::warning("KuCoin Futures ticker exception: " . $e->getMessage());
+        }
+
+        // Fallback to spot level1 orderbook with original symbol
+        $spotUrl = "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=" . urlencode($symbol);
+        Log::info("Fetching KuCoin Spot price: {$spotUrl}");
+        $response = Http::get($spotUrl);
         if ($response->successful()) {
             $data = $response->json();
             return (float) $data['data']['price'];
         }
         
+        Log::error("Failed to fetch KuCoin price for {$symbol}. Response: " . $response->body());
         return null;
     }
 
@@ -604,21 +624,82 @@ class ExchangeService
      */
     private function getKuCoinCandles($symbol, $interval = '1h', $limit = 500)
     {
+        // Prefer KuCoin Futures K-line when using futures symbols or futures-style intervals
+        $futuresSymbol = $this->mapToKuCoinFuturesSymbol($symbol);
+
+        // Map common intervals to numeric minutes required by futures endpoint
+        $intervalMap = [
+            '1m' => 1, '1min' => 1, '1minute' => 1,
+            '5m' => 5, '5min' => 5, '5minute' => 5,
+            '15m' => 15, '15min' => 15, '15minute' => 15,
+            '30m' => 30, '30min' => 30, '30minute' => 30,
+            '1h' => 60, '1hour' => 60,
+            '4h' => 240, '4hour' => 240,
+            '1d' => 1440, '1day' => 1440,
+        ];
+
+        $granularity = $intervalMap[$interval] ?? null;
+
+        if ($granularity !== null) {
+            $url = 'https://api-futures.kucoin.com/api/v1/kline/query';
+
+            $to = (int) round(microtime(true) * 1000);
+            $from = $to - ($limit * $granularity * 60 * 1000);
+
+            $params = [
+                'symbol' => $futuresSymbol,
+                'granularity' => (int)$granularity,
+                'from' => $from,
+                'to' => $to,
+            ];
+
+            Log::info("Making KuCoin Futures K-line request to: {$url} with params: " . json_encode($params));
+
+            $response = Http::get($url, $params);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                $candles = [];
+
+                if (isset($data['data']) && is_array($data['data'])) {
+                    foreach ($data['data'] as $candle) {
+                        if (is_array($candle) && count($candle) >= 6) {
+                            $candles[] = [
+                                'timestamp' => $candle[0],
+                                'open' => (float) $candle[1],
+                                'close' => (float) $candle[2],
+                                'high' => (float) $candle[3],
+                                'low' => (float) $candle[4],
+                                'volume' => (float) $candle[5]
+                            ];
+                        }
+                    }
+                }
+
+                Log::info("Successfully fetched " . count($candles) . " KuCoin Futures candlesticks for {$futuresSymbol} with granularity {$granularity}");
+                return array_reverse($candles);
+            }
+
+            Log::warning("KuCoin Futures K-line request failed for {$futuresSymbol} (granularity {$granularity}). Falling back to spot endpoint. Status: {$response->status()}, Response: {$response->body()}");
+            // Fall through to spot endpoint below as a fallback
+        }
+
+        // Fallback to spot candlesticks endpoint (expects type like 1hour/1day)
         $url = "https://api.kucoin.com/api/v1/market/candles";
         $params = [
             'symbol' => $symbol,
             'type' => $interval,
             'limit' => $limit
         ];
-        
-        Log::info("Making KuCoin request to: {$url} with params: " . json_encode($params));
-        
+
+        Log::info("Making KuCoin Spot request to: {$url} with params: " . json_encode($params));
+
         $response = Http::get($url, $params);
-        
+
         if ($response->successful()) {
             $data = $response->json();
             $candles = [];
-            
+
             if (isset($data['data']) && is_array($data['data'])) {
                 foreach ($data['data'] as $candle) {
                     if (is_array($candle) && count($candle) >= 6) {
@@ -633,12 +714,12 @@ class ExchangeService
                     }
                 }
             }
-            
-            Log::info("Successfully fetched " . count($candles) . " KuCoin candlesticks for {$symbol} with interval {$interval}");
+
+            Log::info("Successfully fetched " . count($candles) . " KuCoin Spot candlesticks for {$symbol} with interval {$interval}");
             return array_reverse($candles); // Return in chronological order
         }
-        
-        Log::error("Failed to fetch KuCoin candles for {$symbol} with interval {$interval}. Status: {$response->status()}, Response: {$response->body()}");
+
+        Log::error("Failed to fetch KuCoin Spot candles for {$symbol} with interval {$interval}. Status: {$response->status()}, Response: {$response->body()}");
         return [];
     }
 
