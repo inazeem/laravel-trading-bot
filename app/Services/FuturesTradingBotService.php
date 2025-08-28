@@ -1360,6 +1360,9 @@ public function closePosition(FuturesTrade $trade, float $currentPrice): void
                     'closed_at' => now(),
                 ]);
                 
+                // Cancel any remaining open SL/TP orders and clear IDs
+                $this->cancelProtectiveOrders($trade);
+
                 $this->logger->info("💾 [CLOSE POSITION] Trade marked as closed (position already closed on exchange)");
                 $this->setCooldownPeriod();
                 return;
@@ -1388,6 +1391,9 @@ public function closePosition(FuturesTrade $trade, float $currentPrice): void
                         'closed_at' => now(),
                     ]);
                     
+                    // Cancel any remaining open SL/TP orders and clear IDs
+                    $this->cancelProtectiveOrders($trade);
+
                     $this->logger->info("💾 [CLOSE POSITION] Trade updated in database with final PnL");
                     
                     // Set cooldown period after closing position
@@ -1420,6 +1426,9 @@ public function closePosition(FuturesTrade $trade, float $currentPrice): void
                         'closed_at' => now(),
                     ]);
                     
+                    // Cancel any remaining open SL/TP orders and clear IDs
+                    $this->cancelProtectiveOrders($trade);
+
                     $this->logger->info("💾 [MARGIN ERROR] Position marked as closed due to margin error");
                     $this->setCooldownPeriod();
                 } else {
@@ -1542,6 +1551,35 @@ public function closePosition(FuturesTrade $trade, float $currentPrice): void
         return true;
 
 
+    }
+
+    /**
+     * Cancel remaining protective orders (SL/TP) for a trade and clear IDs
+     */
+    private function cancelProtectiveOrders(FuturesTrade $trade): void
+    {
+        try {
+            // Attempt cancel-all for safety
+            $this->exchangeService->cancelAllOpenOrdersForSymbol($trade->symbol);
+
+            // Also try targeted cancellations if IDs exist
+            if (!empty($trade->stop_loss_order_id)) {
+                $this->exchangeService->cancelOrder($trade->symbol, $trade->stop_loss_order_id);
+            }
+            if (!empty($trade->take_profit_order_id)) {
+                $this->exchangeService->cancelOrder($trade->symbol, $trade->take_profit_order_id);
+            }
+
+            // Clear IDs in DB to avoid manual cleanup
+            $trade->update([
+                'stop_loss_order_id' => null,
+                'take_profit_order_id' => null,
+            ]);
+
+            $this->logger->info("🧹 [CLEANUP] Protective orders cancelled and IDs cleared for trade {$trade->id}");
+        } catch (\Exception $e) {
+            $this->logger->error("❌ [CLEANUP] Failed cancelling protective orders: " . $e->getMessage());
+        }
     }
 }
 

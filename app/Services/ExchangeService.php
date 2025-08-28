@@ -1512,4 +1512,117 @@ class ExchangeService
         return [];
     }
     
+    /**
+     * Cancel a specific order by ID
+     */
+    public function cancelOrder($symbol, $orderId): bool
+    {
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    // Mock success
+                    Log::info("[CANCEL] KuCoin cancel order (mock) for {$symbol} orderId {$orderId}");
+                    return true;
+                case 'binance':
+                    return $this->cancelBinanceOrder($symbol, $orderId);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error cancelling order {$orderId} for {$symbol}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Cancel all open orders for a symbol
+     */
+    public function cancelAllOpenOrdersForSymbol($symbol): bool
+    {
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    // Mock success
+                    Log::info("[CANCEL ALL] KuCoin cancel all (mock) for {$symbol}");
+                    return true;
+                case 'binance':
+                    return $this->cancelBinanceAllOpenOrders($symbol);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error cancelling all open orders for {$symbol}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Cancel a Binance futures order
+     */
+    private function cancelBinanceOrder($symbol, $orderId): bool
+    {
+        // Normalize symbol for Binance (remove dash)
+        $binanceSymbol = str_replace('-', '', $symbol);
+        $timestamp = round(microtime(true) * 1000);
+        $endpoint = '/fapi/v1/order';
+
+        $params = [
+            'symbol' => $binanceSymbol,
+            'orderId' => $orderId,
+            'timestamp' => (int)$timestamp,
+        ];
+
+        $queryString = http_build_query($params);
+        $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+        $params['signature'] = $signature;
+
+        Log::info("[CANCEL] Binance cancel order: " . json_encode($params));
+
+        $response = Http::withHeaders([
+            'X-MBX-APIKEY' => $this->apiKey
+        ])->asForm()->delete('https://fapi.binance.com' . $endpoint, $params);
+
+        if ($response->successful()) {
+            Log::info("[CANCEL] Binance order {$orderId} cancel success");
+            return true;
+        }
+
+        Log::error("[CANCEL] Binance order {$orderId} cancel failed: " . $response->body());
+        return false;
+    }
+
+    /**
+     * Cancel all open Binance futures orders for a symbol
+     */
+    private function cancelBinanceAllOpenOrders($symbol): bool
+    {
+        // Normalize symbol for Binance (remove dash)
+        $binanceSymbol = str_replace('-', '', $symbol);
+        $timestamp = round(microtime(true) * 1000);
+        $endpoint = '/fapi/v1/allOpenOrders';
+
+        $params = [
+            'symbol' => $binanceSymbol,
+            'timestamp' => (int)$timestamp,
+        ];
+
+        $queryString = http_build_query($params);
+        $signature = hash_hmac('sha256', $queryString, $this->secretKey);
+        $params['signature'] = $signature;
+
+        Log::info("[CANCEL ALL] Binance cancel all open orders: " . json_encode($params));
+
+        $response = Http::withHeaders([
+            'X-MBX-APIKEY' => $this->apiKey
+        ])->asForm()->delete('https://fapi.binance.com' . $endpoint, $params);
+
+        if ($response->successful()) {
+            Log::info("[CANCEL ALL] Binance cancel all open orders success for {$binanceSymbol}");
+            return true;
+        }
+
+        Log::error("[CANCEL ALL] Binance cancel all open orders failed: " . $response->body());
+        return false;
+    }
+    
 }
