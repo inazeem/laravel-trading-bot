@@ -13,10 +13,21 @@ class SmartMoneyConceptsService
     private array $fairValueGaps = [];
     private array $equalHighs = [];
     private array $equalLows = [];
+    private string $mode = 'spot';
+    private float $minSignalQuality = 0.3;
+    private float $orderBlockProximityThreshold = 0.02;
 
-    public function __construct(array $candles)
+    public function __construct(array $candles, string $mode = 'spot')
     {
         $this->candles = $candles;
+        $this->mode = $mode;
+        // Configure thresholds per mode (spot vs futures)
+        $this->minSignalQuality = $mode === 'futures'
+            ? (float) config('micro_trading.signal_settings.min_quality_futures', 0.5)
+            : (float) config('micro_trading.signal_settings.min_quality_spot', 0.3);
+        $this->orderBlockProximityThreshold = $mode === 'futures'
+            ? (float) config('micro_trading.signal_settings.order_block_proximity_threshold_futures', config('micro_trading.signal_settings.order_block_proximity_threshold', 0.02))
+            : (float) config('micro_trading.signal_settings.order_block_proximity_threshold_spot', config('micro_trading.signal_settings.order_block_proximity_threshold', 0.03));
         $this->analyzeStructure();
     }
 
@@ -419,7 +430,7 @@ class SmartMoneyConceptsService
     public function getNearbyOrderBlocks(float $currentPrice, ?float $threshold = null): array
     {
         if ($threshold === null) {
-            $threshold = config('micro_trading.signal_settings.order_block_proximity_threshold', 0.02);
+            $threshold = $this->orderBlockProximityThreshold;
         }
         return array_filter($this->orderBlocks, function($block) use ($currentPrice, $threshold) {
             $blockMid = ($block['high'] + $block['low']) / 2;
@@ -476,9 +487,9 @@ class SmartMoneyConceptsService
             $signalScore = $this->calculateSignalScore($block, $trend, $currentPrice);
             
             \Log::info("📊 [SIGNAL] Block type: {$block['type']}, Trend: {$trendDirection}, Signal Score: {$signalScore}");
-            // Only generate signals above minimum quality threshold
-            if ($signalScore < 0.3) {
-                \Log::info("🚫 [SIGNAL] Signal quality too low: {$signalScore} (minimum: 0.3)");
+            // Only generate signals above minimum quality threshold (mode-specific)
+            if ($signalScore < $this->minSignalQuality) {
+                \Log::info("🚫 [SIGNAL] Signal quality too low: {$signalScore} (minimum: {$this->minSignalQuality})");
                 continue;
             }
             

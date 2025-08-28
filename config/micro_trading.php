@@ -33,6 +33,10 @@ return [
         'min_strength_threshold' => 0.7,  // 70% - Strong signals only (quality over quantity)
         'high_strength_requirement' => 0.90,  // 90% - Absolute strongest signals for 5:1 R/R
         'order_block_proximity_threshold' => 0.03, // 3% proximity for considering order blocks
+        'order_block_proximity_threshold_spot' => 0.03,
+        'order_block_proximity_threshold_futures' => 0.015,
+        'min_quality_spot' => 0.30,
+        'min_quality_futures' => 0.60,
         'min_confluence' => 1,  // Single timeframe confirmation for faster execution
         'max_trade_duration_hours' => 4,  // Longer duration for 7.5% take profit targets
     ],

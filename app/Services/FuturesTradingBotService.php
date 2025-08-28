@@ -160,8 +160,8 @@ class FuturesTradingBotService
             $this->logger->info("✅ [CANDLES] Received " . count($candles) . " candlesticks for {$timeframe}");
             
             // Initialize Smart Money Concepts service
-            $this->logger->info("🧠 [SMC] Initializing Smart Money Concepts analysis for {$timeframe}...");
-            $this->smcService = new SmartMoneyConceptsService($candles);
+            $this->logger->info("🧠 [SMC] Initializing Smart Money Concepts analysis for {$timeframe} (mode: futures)...");
+            $this->smcService = new SmartMoneyConceptsService($candles, 'futures');
             
             // Generate signals for this timeframe
             $this->logger->info("🔍 [SIGNALS] Generating signals for {$timeframe} timeframe...");

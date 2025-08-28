@@ -142,8 +142,8 @@ class TradingBotService
             $this->logger->info("✅ [CANDLES] Received " . count($candles) . " candlesticks for {$timeframe}");
             
             // Initialize Smart Money Concepts service
-            $this->logger->info("🧠 [SMC] Initializing Smart Money Concepts analysis for {$timeframe}...");
-            $this->smcService = new SmartMoneyConceptsService($candles);
+            $this->logger->info("🧠 [SMC] Initializing Smart Money Concepts analysis for {$timeframe} (mode: spot)...");
+            $this->smcService = new SmartMoneyConceptsService($candles, 'spot');
             
             // Generate signals for this timeframe
             $this->logger->info("🔍 [SIGNALS] Generating signals for {$timeframe} timeframe...");
@@ -197,7 +197,7 @@ class TradingBotService
             return;
         }
         
-        $requiredStrength = config('micro_trading.signal_settings.high_strength_requirement', 0.70);
+        $requiredStrength = (float) config('enhanced_trading.signal_strength.minimum_strength', 0.70);
         $this->logger->info("🔍 [FILTER] Filtering and ranking " . count($signals) . " signals with " . ($requiredStrength * 100) . "%+ strength requirement...");
         
         // Log all signals before filtering
@@ -240,7 +240,7 @@ class TradingBotService
     private function filterSignalsByStrength(array $signals): array
     {
         $filtered = [];
-        $minStrength = (float) config('micro_trading.signal_settings.high_strength_requirement', 0.70);
+        $minStrength = (float) config('enhanced_trading.signal_strength.minimum_strength', 0.70);
         
         foreach ($signals as $signal) {
             $strength = $signal['strength'] ?? 0;

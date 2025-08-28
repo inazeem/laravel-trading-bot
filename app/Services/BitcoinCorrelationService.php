@@ -47,8 +47,8 @@ class BitcoinCorrelationService
                 return false;
             }
             
-            // Initialize SMC service for Bitcoin
-            $this->btcSmcService = new SmartMoneyConceptsService($btcCandles);
+            // Initialize SMC service for Bitcoin (futures-grade accuracy)
+            $this->btcSmcService = new SmartMoneyConceptsService($btcCandles, 'futures');
             
             // Generate Bitcoin signals
             $btcSignals = $this->btcSmcService->generateSignals($btcPrice);
@@ -123,7 +123,7 @@ class BitcoinCorrelationService
                 return 0; // Neutral if we can't get data
             }
             
-            $this->btcSmcService = new SmartMoneyConceptsService($btcCandles);
+            $this->btcSmcService = new SmartMoneyConceptsService($btcCandles, 'futures');
             $btcSignals = $this->btcSmcService->generateSignals($btcPrice);
             
             if (empty($btcSignals)) {

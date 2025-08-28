@@ -68,7 +68,7 @@ try {
         echo "   📈 Got " . count($candles) . " candles\n";
         
         // Create SMC service
-        $smcService = new SmartMoneyConceptsService($candles);
+        $smcService = new SmartMoneyConceptsService($candles, 'futures');
         
         // Get nearby order blocks
         $nearbyBlocks = $smcService->getNearbyOrderBlocks($currentPrice, 0.02);
