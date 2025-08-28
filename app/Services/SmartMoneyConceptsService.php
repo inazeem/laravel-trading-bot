@@ -416,8 +416,11 @@ class SmartMoneyConceptsService
     /**
      * Get order blocks near current price
      */
-    public function getNearbyOrderBlocks(float $currentPrice, float $threshold = 0.02): array
+    public function getNearbyOrderBlocks(float $currentPrice, ?float $threshold = null): array
     {
+        if ($threshold === null) {
+            $threshold = config('micro_trading.signal_settings.order_block_proximity_threshold', 0.02);
+        }
         return array_filter($this->orderBlocks, function($block) use ($currentPrice, $threshold) {
             $blockMid = ($block['high'] + $block['low']) / 2;
             $distance = abs($currentPrice - $blockMid) / $blockMid;
