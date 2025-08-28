@@ -142,8 +142,8 @@ class TradingBotService
             $this->logger->info("✅ [CANDLES] Received " . count($candles) . " candlesticks for {$timeframe}");
             
             // Initialize Smart Money Concepts service
-            $this->logger->info("🧠 [SMC] Initializing Smart Money Concepts analysis for {$timeframe}...");
-            $this->smcService = new SmartMoneyConceptsService($candles);
+            $this->logger->info("🧠 [SMC] Initializing Smart Money Concepts analysis for {$timeframe} (mode: spot)...");
+            $this->smcService = new SmartMoneyConceptsService($candles, 'spot');
             
             // Generate signals for this timeframe
             $this->logger->info("🔍 [SIGNALS] Generating signals for {$timeframe} timeframe...");
@@ -159,6 +159,16 @@ class TradingBotService
                 // Add timeframe to signal
                 $signal['timeframe'] = $timeframe;
                 $allSignals[] = $signal;
+            }
+
+            // Forecast high/low range for short-term horizon and log it
+            try {
+                $forecastHorizon = (int) config('micro_trading.signal_settings.max_trade_duration_hours', 4);
+                $forecastService = new \App\Services\HighLowForecastService($candles);
+                $forecast = $forecastService->forecastRange(max(1, $forecastHorizon));
+                $this->logger->info("🔮 [FORECAST] {$timeframe} horizon {$forecastHorizon} -> Low: {$forecast['min']}, High: {$forecast['max']}, Conf: {$forecast['confidence']}");
+            } catch (\Throwable $e) {
+                $this->logger->warning("⚠️ [FORECAST] Forecast failed for {$timeframe}: " . $e->getMessage());
             }
         }
         
@@ -187,7 +197,8 @@ class TradingBotService
             return;
         }
         
-        $this->logger->info("🔍 [FILTER] Filtering and ranking " . count($signals) . " signals with 70%+ strength requirement...");
+        $requiredStrength = (float) config('enhanced_trading.signal_strength.minimum_strength', 0.70);
+        $this->logger->info("🔍 [FILTER] Filtering and ranking " . count($signals) . " signals with " . ($requiredStrength * 100) . "%+ strength requirement...");
         
         // Log all signals before filtering
         foreach ($signals as $index => $signal) {
@@ -197,7 +208,7 @@ class TradingBotService
         // Filter signals with 70%+ strength requirement
         $filteredSignals = $this->filterSignalsByStrength($signals);
         
-        $this->logger->info("✅ [FILTER] " . count($filteredSignals) . " signals passed 70%+ strength requirement");
+        $this->logger->info("✅ [FILTER] " . count($filteredSignals) . " signals passed required strength");
         
         // Log filtered signals
         foreach ($filteredSignals as $index => $signal) {
@@ -210,7 +221,16 @@ class TradingBotService
             $this->logger->info("🎯 [PROCESS] Processing strongest signal with strength: {$strongestSignal['strength']}");
             $this->processSignal($strongestSignal, $currentPrice);
         } else {
-            $this->logger->info("⚠️ [FILTER] No signals met the 70%+ strength requirement - no trades will be placed");
+            $this->logger->info("⚠️ [FILTER] No signals met the required strength - no trades will be placed");
+            // Record the top candidate below threshold for diagnostics
+            if (!empty($signals)) {
+                usort($signals, function($a, $b) {
+                    $sa = $a['strength'] ?? 0; $sb = $b['strength'] ?? 0;
+                    return $sb <=> $sa;
+                });
+                $top = $signals[0];
+                $this->logger->info("📝 [DIAG] Top rejected signal: type={$top['type']}, dir={$top['direction']}, strength=" . ($top['strength'] ?? 0) . ", timeframe=" . ($top['timeframe'] ?? 'n/a'));
+            }
         }
     }
 
@@ -220,7 +240,7 @@ class TradingBotService
     private function filterSignalsByStrength(array $signals): array
     {
         $filtered = [];
-        $minStrength = 0.70; // 70% strength requirement
+        $minStrength = (float) config('enhanced_trading.signal_strength.minimum_strength', 0.70);
         
         foreach ($signals as $signal) {
             $strength = $signal['strength'] ?? 0;
@@ -237,11 +257,11 @@ class TradingBotService
             
             $this->logger->info("🔍 [STRENGTH CHECK] Signal strength: {$strength} (normalized: {$normalizedStrength})");
             
-            // Only accept signals with 70%+ strength
+            // Only accept signals meeting configured strength
             if ($normalizedStrength >= $minStrength) {
                 $signal['normalized_strength'] = $normalizedStrength;
                 $filtered[] = $signal;
-                $this->logger->info("✅ [STRENGTH CHECK] Signal passed 70%+ strength requirement");
+                $this->logger->info("✅ [STRENGTH CHECK] Signal passed strength requirement: {$normalizedStrength} >= {$minStrength}");
             } else {
                 $this->logger->info("❌ [STRENGTH CHECK] Signal rejected - strength too low: {$normalizedStrength} < {$minStrength}");
             }
