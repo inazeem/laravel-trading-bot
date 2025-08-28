@@ -36,12 +36,12 @@ class FuturesTradingBotService
     private function getExchangeInterval(string $timeframe): string
     {
         if ($this->bot->exchange === 'kucoin') {
-            // KuCoin uses different interval formats
+            // KuCoin spot API interval formats
             $kucoinIntervals = [
-                '1m' => '1minute',
-                '5m' => '5minute',
-                '15m' => '15minute',
-                '30m' => '30minute',
+                '1m' => '1min',
+                '5m' => '5min',
+                '15m' => '15min',
+                '30m' => '30min',
                 '1h' => '1hour',
                 '4h' => '4hour',
                 '1d' => '1day'
