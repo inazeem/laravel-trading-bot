@@ -192,6 +192,23 @@
                                 </div>
                             </a>
                             @endcan
+
+                            <form method="POST" action="{{ route('admin.clear-caches') }}" onsubmit="return confirm('Clear all caches? This may take a few seconds.');">
+                                @csrf
+                                <button type="submit" class="block w-full p-4 bg-gradient-to-r from-red-500 to-red-600 rounded-xl text-white hover:from-red-600 hover:to-red-700 transition-all duration-300 transform hover:scale-105">
+                                    <div class="flex items-center">
+                                        <div class="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center mr-4">
+                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v6h6M20 20v-6h-6M5 19a9 9 0 0014-7 9 9 0 00-9-9 9 9 0 00-5 1.7"></path>
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <h3 class="font-semibold">Clear All Caches</h3>
+                                            <p class="text-red-100 text-sm">Flush app, config, route and view caches</p>
+                                        </div>
+                                    </div>
+                                </button>
+                            </form>
                         </div>
                     </div>
                 </div>

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
+use Illuminate\Support\Facades\Artisan;
 
 class AdminController extends Controller
 {
@@ -19,5 +20,22 @@ class AdminController extends Controller
         ];
 
         return view('admin.dashboard', compact('stats'));
+    }
+
+    public function clearCaches()
+    {
+        try {
+            Artisan::call('optimize:clear');
+            Artisan::call('cache:clear');
+            Artisan::call('config:clear');
+            Artisan::call('route:clear');
+            Artisan::call('view:clear');
+            // Reset Spatie permission cache if available
+            Artisan::call('permission:cache-reset');
+
+            return redirect()->back()->with('success', 'All caches cleared successfully.');
+        } catch (\Throwable $e) {
+            return redirect()->back()->with('error', 'Failed to clear caches: ' . $e->getMessage());
+        }
     }
 }

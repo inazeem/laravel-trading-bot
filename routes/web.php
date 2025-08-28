@@ -27,6 +27,7 @@ Route::middleware('auth')->group(function () {
 Route::middleware(['auth', 'permission:access admin panel'])->prefix('admin')->name('admin.')->group(function () {
     // Dashboard
     Route::get('/', [AdminController::class, 'dashboard'])->name('dashboard');
+    Route::post('/clear-caches', [AdminController::class, 'clearCaches'])->name('clear-caches');
     
     // User management
     Route::middleware('permission:view users')->group(function () {
