@@ -11,15 +11,15 @@ return [
     |
     */
 
-    // Candle limits for each timeframe (optimized for ultra-fast micro trading)botoptimisation
+    // Candle limits for each timeframe (ENHANCED for better SMC analysis)
     'candle_limits' => [
-        '1m' => 60,    // 1 hour - Recent price action only
-        '5m' => 48,    // 4 hours - Short-term momentum  
-        '15m' => 32,   // 8 hours - Medium-term structure
-        '30m' => 24,   // 12 hours - Daily session analysis
-        '1h' => 24,    // 1 day - Daily trend analysis
-        '4h' => 30,    // 5 days - Weekly structure
-        '1d' => 30     // 1 month - Monthly overview
+        '1m' => 60,    // 1 hour - Recent price action only (unused)
+        '5m' => 48,    // 4 hours - Short-term momentum (unused)
+        '15m' => 40,   // 10 hours - Enhanced SMC pattern detection
+        '30m' => 32,   // 16 hours - Better confluence & session analysis
+        '1h' => 30,    // 30 hours - Superior trend & volatility analysis
+        '4h' => 30,    // 5 days - Weekly structure (unused)
+        '1d' => 30     // 1 month - Monthly overview (unused)
     ],
 
     // Market trend analysis settings

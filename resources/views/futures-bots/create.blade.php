@@ -173,7 +173,7 @@
                         @foreach($timeframes as $timeframe)
                             <label class="flex items-center">
                                 <input type="checkbox" name="timeframes[]" value="{{ $timeframe }}" 
-                                    {{ in_array($timeframe, old('timeframes', ['1m', '5m', '15m'])) ? 'checked' : '' }}
+                                    {{ in_array($timeframe, old('timeframes', ['15m', '30m', '1h'])) ? 'checked' : '' }}
                                     class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50">
                                 <span class="ml-2 text-sm font-medium text-gray-700">{{ $timeframe }}</span>
                             </label>

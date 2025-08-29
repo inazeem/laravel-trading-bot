@@ -35,7 +35,7 @@ class FuturesTradingBotController extends Controller
             ->where('exchange', '!=', 'coinbase') // Most exchanges support futures
             ->get();
 
-        $timeframes = ['1m', '5m', '15m'];
+        $timeframes = ['15m', '30m', '1h'];
         $leverages = [1, 2, 3, 5, 10, 20, 50, 100];
         $marginTypes = ['isolated', 'cross'];
         $positionSides = ['long', 'short', 'both'];
@@ -52,7 +52,7 @@ class FuturesTradingBotController extends Controller
             'risk_percentage' => 'required|numeric|min:0.1|max:10',
             'max_position_size' => 'required|numeric|min:0.001',
             'timeframes' => 'required|array|min:1',
-            'timeframes.*' => 'in:1m,5m,15m',
+            'timeframes.*' => 'in:15m,30m,1h',
             'leverage' => 'required|integer|min:1|max:100',
             'margin_type' => 'required|in:isolated,cross',
             'position_side' => 'required|in:long,short,both',
@@ -140,7 +140,7 @@ class FuturesTradingBotController extends Controller
             ->where('is_active', true)
             ->get();
 
-        $timeframes = ['1m', '5m', '15m'];
+        $timeframes = ['15m', '30m', '1h'];
         $leverages = [1, 2, 3, 5, 10, 20, 50, 100];
         $marginTypes = ['isolated', 'cross'];
         $positionSides = ['long', 'short', 'both'];
@@ -162,7 +162,7 @@ class FuturesTradingBotController extends Controller
             'risk_percentage' => 'required|numeric|min:0.1|max:10',
             'max_position_size' => 'required|numeric|min:0.001',
             'timeframes' => 'required|array|min:1',
-            'timeframes.*' => 'in:1m,5m,15m',
+            'timeframes.*' => 'in:15m,30m,1h',
             'leverage' => 'required|integer|min:1|max:100',
             'margin_type' => 'required|in:isolated,cross',
             'position_side' => 'required|in:long,short,both',
