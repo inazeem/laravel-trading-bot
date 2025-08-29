@@ -801,20 +801,7 @@ class ExchangeService
         return $updatedCount;
     }
 
-    /**
-     * Get KuCoin futures balance
-     */
-    private function getKuCoinFuturesBalance()
-    {
-        // Mock implementation for now
-        return [
-            [
-                'currency' => 'USDT',
-                'available' => 1000.0,
-                'total' => 1000.0
-            ]
-        ];
-    }
+
 
     /**
      * Get Binance futures balance
@@ -986,15 +973,513 @@ class ExchangeService
      */
     private function placeKuCoinFuturesOrder($symbol, $side, $quantity, $leverage, $marginType, $stopLoss = null, $takeProfit = null)
     {
-        // Mock implementation for now
+        try {
+            // Map to KuCoin futures symbol format
+            $futuresSymbol = $this->mapToKuCoinFuturesSymbol($symbol);
+            
+            Log::info("Placing KuCoin futures order: {$side} {$quantity} {$futuresSymbol} with {$leverage}x leverage");
+            
+            // First, set the leverage for the symbol
+            $this->setKuCoinFuturesLeverage($futuresSymbol, $leverage);
+            
+            // Prepare order data according to KuCoin Futures API
+            $timestamp = time() * 1000;
+            $orderData = [
+                'clientOid' => 'futures_' . $timestamp . '_' . rand(1000, 9999),
+                'symbol' => $futuresSymbol,
+                'type' => 'market', // Market order for immediate execution
+                'side' => $side, // 'buy' or 'sell'
+                'leverage' => $leverage,
+                'size' => $quantity, // Quantity in contracts
+                'timeInForce' => 'IOC', // Immediate or Cancel for market orders
+            ];
+            
+            // Add stop loss if provided
+            if ($stopLoss !== null) {
+                $orderData['stop'] = $stopLoss;
+                $orderData['stopPriceType'] = 'TP'; // Take profit price type
+            }
+            
+            Log::info("KuCoin futures order data: " . json_encode($orderData));
+            
+            // Create the signature for authenticated request
+            $requestBody = json_encode($orderData);
+            $signature = $this->createKuCoinSignature('POST', '/api/v1/orders', $requestBody, $timestamp);
+            
+            // Place the order
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
+                'KC-API-KEY-VERSION' => '2',
+                'Content-Type' => 'application/json'
+            ])->post('https://api-futures.kucoin.com/api/v1/orders', $orderData);
+            
+            if ($response->successful()) {
+                $responseData = $response->json();
+                
+                if (isset($responseData['data']['orderId'])) {
+                    Log::info("KuCoin futures order placed successfully: " . $responseData['data']['orderId']);
+                    
         return [
-            'order_id' => 'mock_kucoin_' . time(),
+                        'order_id' => $responseData['data']['orderId'],
             'symbol' => $symbol,
             'side' => $side,
             'quantity' => $quantity,
             'price' => 0, // Market order
-            'status' => 'filled'
-        ];
+                        'status' => 'filled',
+                        'leverage' => $leverage,
+                        'futures_symbol' => $futuresSymbol,
+                        'exchange_response' => $responseData
+                    ];
+                } else {
+                    Log::error("KuCoin futures order failed - no order ID in response: " . $response->body());
+                    throw new \Exception("Failed to place KuCoin futures order - no order ID returned");
+                }
+            } else {
+                $errorBody = $response->body();
+                Log::error("KuCoin futures order failed: " . $errorBody);
+                
+                // Parse error for better user feedback
+                $errorData = $response->json();
+                $errorMessage = isset($errorData['msg']) ? $errorData['msg'] : 'Unknown error';
+                
+                throw new \Exception("KuCoin futures order failed: {$errorMessage}");
+            }
+            
+        } catch (\Exception $e) {
+            Log::error("Exception in KuCoin futures order: " . $e->getMessage());
+            throw $e;
+        }
+    }
+    
+    /**
+     * Set leverage for KuCoin futures symbol
+     */
+    private function setKuCoinFuturesLeverage(string $symbol, int $leverage): void
+    {
+        try {
+            $timestamp = time() * 1000;
+            $leverageData = [
+                'symbol' => $symbol,
+                'leverage' => $leverage
+            ];
+            
+            $requestBody = json_encode($leverageData);
+            $signature = $this->createKuCoinSignature('POST', '/api/v1/position/leverage', $requestBody, $timestamp);
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
+                'KC-API-KEY-VERSION' => '2',
+                'Content-Type' => 'application/json'
+            ])->post('https://api-futures.kucoin.com/api/v1/position/leverage', $leverageData);
+            
+            if ($response->successful()) {
+                Log::info("KuCoin futures leverage set to {$leverage}x for {$symbol}");
+            } else {
+                Log::warning("Failed to set KuCoin futures leverage: " . $response->body());
+                // Don't throw exception as leverage might already be set
+            }
+            
+        } catch (\Exception $e) {
+            Log::warning("Exception setting KuCoin futures leverage: " . $e->getMessage());
+            // Don't throw exception as this is not critical
+        }
+    }
+    
+    /**
+     * Create KuCoin API signature for authenticated requests
+     */
+    private function createKuCoinSignature(string $method, string $endpoint, string $body, int $timestamp): string
+    {
+        $what = $timestamp . $method . $endpoint . $body;
+        return base64_encode(hash_hmac('sha256', $what, $this->secretKey, true));
+    }
+    
+    /**
+     * Create KuCoin passphrase signature
+     */
+    private function createKuCoinPassphraseSignature(): string
+    {
+        return base64_encode(hash_hmac('sha256', $this->passphrase, $this->secretKey, true));
+    }
+    
+    /**
+     * Get KuCoin futures balance
+     */
+    private function getKuCoinFuturesBalance()
+    {
+        try {
+            $timestamp = time() * 1000;
+            $endpoint = '/api/v1/account-overview';
+            $signature = $this->createKuCoinSignature('GET', $endpoint, '', $timestamp);
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
+                'KC-API-KEY-VERSION' => '2',
+            ])->get('https://api-futures.kucoin.com' . $endpoint);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                
+                if (isset($data['data'])) {
+                    $balances = [];
+                    
+                    // KuCoin futures returns account overview with available balance
+                    $balances[] = [
+                        'currency' => 'USDT',
+                        'available' => $data['data']['availableBalance'] ?? 0,
+                        'balance' => $data['data']['accountEquity'] ?? 0,
+                        'hold' => $data['data']['frozenFunds'] ?? 0,
+                    ];
+                    
+                    Log::info("KuCoin futures balance fetched: Available USDT = " . ($data['data']['availableBalance'] ?? 0));
+                    return $balances;
+                }
+            }
+            
+            Log::error("Failed to get KuCoin futures balance: " . $response->body());
+            return [];
+            
+        } catch (\Exception $e) {
+            Log::error("Exception getting KuCoin futures balance: " . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Get KuCoin futures open positions
+     */
+    public function getOpenPositions($symbol = null)
+    {
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->getKuCoinFuturesPositions($symbol);
+                case 'binance':
+                    return $this->getBinanceFuturesPositions($symbol);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error getting open positions: " . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Get KuCoin futures positions
+     */
+    private function getKuCoinFuturesPositions($symbol = null)
+    {
+        try {
+            $timestamp = time() * 1000;
+            $endpoint = '/api/v1/positions';
+            
+            // Add symbol filter if provided
+            $queryParams = '';
+            if ($symbol) {
+                $futuresSymbol = $this->mapToKuCoinFuturesSymbol($symbol);
+                $queryParams = '?symbol=' . urlencode($futuresSymbol);
+                $endpoint .= $queryParams;
+            }
+            
+            $signature = $this->createKuCoinSignature('GET', $endpoint, '', $timestamp);
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
+                'KC-API-KEY-VERSION' => '2',
+            ])->get('https://api-futures.kucoin.com' . $endpoint);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                $positions = [];
+                
+                if (isset($data['data']) && is_array($data['data'])) {
+                    foreach ($data['data'] as $position) {
+                        // Only include positions with size > 0 and isOpen = true
+                        $currentQty = floatval($position['currentQty'] ?? 0);
+                        $isOpen = $position['isOpen'] ?? false;
+                        
+                        Log::info("Processing KuCoin position: " . json_encode([
+                            'symbol' => $position['symbol'],
+                            'currentQty' => $currentQty,
+                            'isOpen' => $isOpen,
+                            'condition_met' => (abs($currentQty) > 0 && $isOpen)
+                        ]));
+                        
+                        if (abs($currentQty) > 0 && $isOpen) {
+                            $positions[] = [
+                                'symbol' => $position['symbol'],
+                                'side' => $currentQty > 0 ? 'long' : 'short',
+                                'quantity' => abs($currentQty),
+                                'entry_price' => floatval($position['avgEntryPrice'] ?? 0),
+                                'unrealized_pnl' => floatval($position['unrealisedPnl'] ?? 0),
+                                'leverage' => floatval($position['realLeverage'] ?? 1),
+                                'margin_type' => ($position['crossMode'] ?? false) ? 'cross' : 'isolated',
+                            ];
+                        }
+                    }
+                }
+                
+                Log::info("KuCoin futures positions fetched: " . count($positions) . " open positions");
+                return $positions;
+            }
+            
+            Log::error("Failed to get KuCoin futures positions: " . $response->body());
+            return [];
+            
+        } catch (\Exception $e) {
+            Log::error("Exception getting KuCoin futures positions: " . $e->getMessage());
+            return [];
+        }
+    }
+    
+    /**
+     * Close KuCoin futures position
+     */
+    private function closeKuCoinFuturesPosition($symbol, $side, $quantity, $orderId = null)
+    {
+        try {
+            $futuresSymbol = $this->mapToKuCoinFuturesSymbol($symbol);
+            
+            // For closing, we need to place an opposite side order
+            $closeSide = ($side === 'long') ? 'sell' : 'buy';
+            
+            Log::info("Closing KuCoin futures position: {$closeSide} {$quantity} {$futuresSymbol}");
+            
+            $timestamp = time() * 1000;
+            $orderData = [
+                'clientOid' => 'close_' . $timestamp . '_' . rand(1000, 9999),
+                'symbol' => $futuresSymbol,
+                'type' => 'market',
+                'side' => $closeSide,
+                'size' => $quantity,
+                'reduceOnly' => true, // This ensures we're closing position, not opening new one
+                'timeInForce' => 'IOC',
+            ];
+            
+            $requestBody = json_encode($orderData);
+            $signature = $this->createKuCoinSignature('POST', '/api/v1/orders', $requestBody, $timestamp);
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
+                'KC-API-KEY-VERSION' => '2',
+                'Content-Type' => 'application/json'
+            ])->post('https://api-futures.kucoin.com/api/v1/orders', $orderData);
+            
+            if ($response->successful()) {
+                $responseData = $response->json();
+                
+                if (isset($responseData['data']['orderId'])) {
+                    Log::info("KuCoin futures position closed successfully: " . $responseData['data']['orderId']);
+                    
+                    return [
+                        'order_id' => $responseData['data']['orderId'],
+                        'symbol' => $symbol,
+                        'side' => $closeSide,
+                        'quantity' => $quantity,
+                        'status' => 'filled',
+                        'futures_symbol' => $futuresSymbol,
+                        'exchange_response' => $responseData
+                    ];
+                }
+            }
+            
+            Log::error("Failed to close KuCoin futures position: " . $response->body());
+            return null;
+            
+        } catch (\Exception $e) {
+            Log::error("Exception closing KuCoin futures position: " . $e->getMessage());
+            throw $e;
+        }
+    }
+    
+    /**
+     * Get order status from KuCoin
+     */
+    public function getOrderStatus($symbol, $orderId)
+    {
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->getKuCoinOrderStatus($symbol, $orderId);
+                case 'binance':
+                    return $this->getBinanceOrderStatus($symbol, $orderId);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error getting order status: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Get KuCoin order status
+     */
+    private function getKuCoinOrderStatus($symbol, $orderId)
+    {
+        try {
+            $timestamp = time() * 1000;
+            $endpoint = "/api/v1/orders/{$orderId}";
+            $signature = $this->createKuCoinSignature('GET', $endpoint, '', $timestamp);
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
+                'KC-API-KEY-VERSION' => '2',
+            ])->get('https://api-futures.kucoin.com' . $endpoint);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                
+                if (isset($data['data'])) {
+                    return [
+                        'order_id' => $data['data']['id'],
+                        'status' => strtoupper($data['data']['status']), // Convert to uppercase to match Binance format
+                        'symbol' => $data['data']['symbol'],
+                        'side' => $data['data']['side'],
+                        'quantity' => $data['data']['size'],
+                        'filled_quantity' => $data['data']['dealSize'],
+                    ];
+                }
+            }
+            
+            Log::error("Failed to get KuCoin order status: " . $response->body());
+            return null;
+            
+        } catch (\Exception $e) {
+            Log::error("Exception getting KuCoin order status: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Cancel all open orders for a symbol on KuCoin
+     */
+    public function cancelAllOpenOrdersForSymbol($symbol)
+    {
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->cancelAllKuCoinFuturesOrders($symbol);
+                case 'binance':
+                    return $this->cancelAllBinanceFuturesOrders($symbol);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error cancelling all orders: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Cancel all KuCoin futures orders for a symbol
+     */
+    private function cancelAllKuCoinFuturesOrders($symbol)
+    {
+        try {
+            $futuresSymbol = $this->mapToKuCoinFuturesSymbol($symbol);
+            $timestamp = time() * 1000;
+            $endpoint = '/api/v1/orders';
+            
+            $cancelData = [
+                'symbol' => $futuresSymbol
+            ];
+            
+            $requestBody = json_encode($cancelData);
+            $signature = $this->createKuCoinSignature('DELETE', $endpoint, $requestBody, $timestamp);
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
+                'KC-API-KEY-VERSION' => '2',
+                'Content-Type' => 'application/json'
+            ])->delete('https://api-futures.kucoin.com' . $endpoint, $cancelData);
+            
+            if ($response->successful()) {
+                Log::info("All KuCoin futures orders cancelled for {$futuresSymbol}");
+                return true;
+            }
+            
+            Log::warning("Failed to cancel all KuCoin futures orders: " . $response->body());
+            return false;
+            
+        } catch (\Exception $e) {
+            Log::error("Exception cancelling all KuCoin futures orders: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Cancel specific order
+     */
+    public function cancelOrder($symbol, $orderId)
+    {
+        try {
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->cancelKuCoinOrder($symbol, $orderId);
+                case 'binance':
+                    return $this->cancelBinanceOrder($symbol, $orderId);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error cancelling order: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Cancel specific KuCoin order
+     */
+    private function cancelKuCoinOrder($symbol, $orderId)
+    {
+        try {
+            $timestamp = time() * 1000;
+            $endpoint = "/api/v1/orders/{$orderId}";
+            $signature = $this->createKuCoinSignature('DELETE', $endpoint, '', $timestamp);
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
+                'KC-API-KEY-VERSION' => '2',
+            ])->delete('https://api-futures.kucoin.com' . $endpoint);
+            
+            if ($response->successful()) {
+                Log::info("KuCoin order {$orderId} cancelled successfully");
+                return true;
+            }
+            
+            Log::warning("Failed to cancel KuCoin order {$orderId}: " . $response->body());
+            return false;
+            
+        } catch (\Exception $e) {
+            Log::error("Exception cancelling KuCoin order: " . $e->getMessage());
+            return false;
+        }
     }
 
     /**
@@ -1324,20 +1809,7 @@ class ExchangeService
         }
     }
 
-    /**
-     * Close KuCoin futures position
-     */
-    private function closeKuCoinFuturesPosition($symbol, $side, $quantity, $orderId = null)
-    {
-        // Mock implementation for now
-        return [
-            'order_id' => 'mock_close_kucoin_' . time(),
-            'symbol' => $symbol,
-            'side' => $side,
-            'quantity' => $quantity,
-            'status' => 'filled'
-        ];
-    }
+
 
     /**
      * Close Binance futures position - FIXED VERSION
@@ -1456,25 +1928,7 @@ class ExchangeService
         }
     }
 
-    /**
-     * Get order status from exchange
-     */
-    public function getOrderStatus($symbol, $orderId)
-    {
-        try {
-            switch ($this->exchange) {
-                case 'kucoin':
-                    return $this->getKuCoinOrderStatus($symbol, $orderId);
-                case 'binance':
-                    return $this->getBinanceOrderStatus($symbol, $orderId);
-                default:
-                    throw new \Exception("Unsupported exchange: {$this->exchange}");
-            }
-        } catch (\Exception $e) {
-            Log::error("Error getting order status: " . $e->getMessage());
-            return null;
-        }
-    }
+
 
     /**
      * Get Binance order status
@@ -1513,38 +1967,9 @@ class ExchangeService
         return null;
     }
 
-    /**
-     * Get KuCoin order status (mock implementation)
-     */
-    private function getKuCoinOrderStatus($symbol, $orderId)
-    {
-        // Mock implementation for now
-        return [
-            'orderId' => $orderId,
-            'status' => 'FILLED',
-            'symbol' => $symbol
-        ];
-    }
 
-    /**
-     * Get open positions from exchange
-     */
-    public function getOpenPositions($symbol = null)
-    {
-        try {
-            switch ($this->exchange) {
-                case 'kucoin':
-                    return $this->getKuCoinOpenPositions($symbol);
-                case 'binance':
-                    return $this->getBinanceOpenPositions($symbol);
-                default:
-                    throw new \Exception("Unsupported exchange: {$this->exchange}");
-            }
-        } catch (\Exception $e) {
-            Log::error("Error getting open positions: " . $e->getMessage());
-            return [];
-        }
-    }
+
+
 
     /**
      * Get Binance open positions
@@ -1603,58 +2028,81 @@ class ExchangeService
     }
 
     /**
-     * Get KuCoin open positions (mock implementation)
+     * Get KuCoin open positions
      */
     private function getKuCoinOpenPositions($symbol = null)
     {
-        // Mock implementation for now
-        return [];
+        try {
+            $timestamp = time() * 1000;
+            $endpoint = '/api/v1/positions';
+            
+            // Add symbol filter if provided
+            $queryParams = '';
+            if ($symbol) {
+                $futuresSymbol = $this->mapToKuCoinFuturesSymbol($symbol);
+                $queryParams = '?symbol=' . urlencode($futuresSymbol);
+                $endpoint .= $queryParams;
+            }
+            
+            $signature = $this->createKuCoinSignature('GET', $endpoint, '', $timestamp);
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
+                'KC-API-KEY-VERSION' => '2',
+            ])->get('https://api-futures.kucoin.com' . $endpoint);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                $positions = [];
+                
+                if (isset($data['data']) && is_array($data['data'])) {
+                    foreach ($data['data'] as $position) {
+                        // Only include positions with size > 0 and isOpen = true
+                        $currentQty = floatval($position['currentQty'] ?? 0);
+                        $isOpen = $position['isOpen'] ?? false;
+                        
+                        Log::info("Processing KuCoin position: " . json_encode([
+                            'symbol' => $position['symbol'],
+                            'currentQty' => $currentQty,
+                            'isOpen' => $isOpen,
+                            'condition_met' => (abs($currentQty) > 0 && $isOpen)
+                        ]));
+                        
+                        if (abs($currentQty) > 0 && $isOpen) {
+                            $positions[] = [
+                                'symbol' => $position['symbol'],
+                                'side' => $currentQty > 0 ? 'long' : 'short',
+                                'quantity' => abs($currentQty),
+                                'entry_price' => floatval($position['avgEntryPrice'] ?? 0),
+                                'unrealized_pnl' => floatval($position['unrealisedPnl'] ?? 0),
+                                'leverage' => floatval($position['realLeverage'] ?? 1),
+                                'margin_type' => ($position['crossMode'] ?? false) ? 'cross' : 'isolated',
+                            ];
+                        }
+                    }
+                }
+                
+                Log::info("KuCoin futures positions fetched: " . count($positions) . " open positions");
+                return $positions;
+            }
+            
+            Log::error("Failed to get KuCoin futures positions: " . $response->body());
+            return [];
+            
+        } catch (\Exception $e) {
+            Log::error("Exception getting KuCoin futures positions: " . $e->getMessage());
+            return [];
+        }
     }
     
-    /**
-     * Cancel a specific order by ID
-     */
-    public function cancelOrder($symbol, $orderId): bool
-    {
-        try {
-            switch ($this->exchange) {
-                case 'kucoin':
-                    // Mock success
-                    Log::info("[CANCEL] KuCoin cancel order (mock) for {$symbol} orderId {$orderId}");
-                    return true;
-                case 'binance':
-                    return $this->cancelBinanceOrder($symbol, $orderId);
-                default:
-                    throw new \Exception("Unsupported exchange: {$this->exchange}");
-            }
-        } catch (\Exception $e) {
-            Log::error("Error cancelling order {$orderId} for {$symbol}: " . $e->getMessage());
-            return false;
-        }
-    }
 
-    /**
-     * Cancel all open orders for a symbol
-     */
-    public function cancelAllOpenOrdersForSymbol($symbol): bool
-    {
-        try {
-            switch ($this->exchange) {
-                case 'kucoin':
-                    // Mock success
-                    Log::info("[CANCEL ALL] KuCoin cancel all (mock) for {$symbol}");
-                    return true;
-                case 'binance':
-                    return $this->cancelBinanceAllOpenOrders($symbol);
-                default:
-                    throw new \Exception("Unsupported exchange: {$this->exchange}");
-            }
-        } catch (\Exception $e) {
-            Log::error("Error cancelling all open orders for {$symbol}: " . $e->getMessage());
-            return false;
-        }
-    }
 
+
+
+    
     /**
      * Cancel a Binance futures order
      */
