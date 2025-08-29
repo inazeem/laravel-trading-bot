@@ -246,41 +246,58 @@ class FuturesTradingBotService
     }
 
     /**
-     * Filter and rank signals based on strength and confluence - HIGH STRENGTH REQUIREMENT
+     * Filter and rank signals based on strength and confluence - ULTRA HIGH STRENGTH REQUIREMENT
      */
     private function filterSignals(array $signals): array
     {
         $filtered = [];
-        $this->logger->info("🔍 [FILTER] Starting to filter " . count($signals) . " signals with HIGH STRENGTH requirement...");
+        $this->logger->info("🔍 [FILTER] Starting to filter " . count($signals) . " signals with ULTRA HIGH STRENGTH requirement...");
         
         foreach ($signals as $index => $signal) {
             $this->logger->info("🔍 [FILTER] Processing signal {$index}: " . json_encode($signal));
             
-            // HIGH-PRECISION: Use strongest signals only for maximum profitability (70% minimum)
-            $requiredStrength = config('micro_trading.signal_settings.high_strength_requirement', 0.90); // 90% strength requirement for absolute strongest signals
+            // ULTRA HIGH-PRECISION: Use only the strongest signals based on analysis results
+            $requiredStrength = config('micro_trading.signal_settings.high_strength_requirement', 0.95); // 95% strength requirement
             $signalStrength = $signal['strength'] ?? 0;
+            
+            // Special priority for engulfing patterns - they get slightly lower threshold
+            if (in_array($signal['type'], ['Engulfing_Bullish', 'Engulfing_Bearish'])) {
+                $requiredStrength = 0.90; // 90% for engulfing patterns
+                $this->logger->info("🕯️ [FILTER] Engulfing pattern detected - using 90% threshold");
+            }
             
             if ($signalStrength < $requiredStrength) {
                 $this->logger->info("❌ [FILTER] Signal {$index} rejected - strength too low: {$signalStrength} (required: {$requiredStrength} = " . ($requiredStrength * 100) . "%)");
                 continue;
             }
             
-            $this->logger->info("✅ [FILTER] Signal {$index} passed HIGH STRENGTH requirement: {$signalStrength} >= {$requiredStrength} (" . ($requiredStrength * 100) . "%)");
+            $this->logger->info("✅ [FILTER] Signal {$index} passed ULTRA HIGH STRENGTH requirement: {$signalStrength} >= {$requiredStrength} (" . ($requiredStrength * 100) . "%)");
             
-            // Check for signal confluence across timeframes
-            $confluence = $this->calculateSignalConfluence($signal, $signals);
-            $this->logger->info("🔗 [FILTER] Signal {$index} confluence: {$confluence}");
+            // Enhanced confluence calculation with time-based weighting
+            $confluence = $this->calculateEnhancedSignalConfluence($signal, $signals);
+            $this->logger->info("🔗 [FILTER] Signal {$index} enhanced confluence: {$confluence}");
             
-            // For high-strength signals (90%+), we can be more flexible with confluence
-            // If only one timeframe is configured, allow signals without confluence
-            $minConfluence = count($this->bot->timeframes) > 1 ? 1 : 0; // Allow single timeframe signals
+            // Updated confluence requirements based on analysis
+            $minConfluence = config('micro_trading.signal_settings.min_confluence', 2);
+            
+            // Special handling for engulfing patterns - they can trade with less confluence
+            if (in_array($signal['type'], ['Engulfing_Bullish', 'Engulfing_Bearish'])) {
+                $minConfluence = 1; // Engulfing patterns need less confluence
+                $this->logger->info("🕯️ [FILTER] Engulfing pattern - reduced confluence requirement to 1");
+            }
+            
+            // Additional quality checks
+            if (!$this->passesQualityChecks($signal)) {
+                $this->logger->info("❌ [FILTER] Signal {$index} failed quality checks");
+                continue;
+            }
             
             if ($confluence >= $minConfluence) {
                 $signal['confluence'] = $confluence;
+                $signal['filter_score'] = $this->calculateFilterScore($signal);
                 $filtered[] = $signal;
-                $this->logger->info("✅ [FILTER] Signal {$index} accepted (high strength: {$signalStrength}, confluence: {$confluence})");
+                $this->logger->info("✅ [FILTER] Signal {$index} accepted (strength: {$signalStrength}, confluence: {$confluence}, filter_score: {$signal['filter_score']})");
             } else {
-                // Even for 90%+ strength, we still need some confluence
                 $this->logger->info("❌ [FILTER] Signal {$index} rejected - insufficient confluence: {$confluence} (minimum: {$minConfluence})");
             }
         }
@@ -318,21 +335,134 @@ class FuturesTradingBotService
     }
 
     /**
-     * Calculate signal confluence across timeframes
+     * Calculate enhanced signal confluence across timeframes with time-based weighting
      */
-    private function calculateSignalConfluence(array $signal, array $allSignals): int
+    private function calculateEnhancedSignalConfluence(array $signal, array $allSignals): int
     {
         $confluence = 0;
         
         foreach ($allSignals as $otherSignal) {
-            if ($otherSignal['type'] === $signal['type'] && 
-                $otherSignal['direction'] === $signal['direction'] &&
+            // Same direction signals from different timeframes
+            if ($otherSignal['direction'] === $signal['direction'] &&
                 $otherSignal['timeframe'] !== $signal['timeframe']) {
-                $confluence++;
+                
+                // Different signal types can still provide confluence if they agree on direction
+                if ($otherSignal['type'] === $signal['type']) {
+                    $confluence += 2; // Same type = stronger confluence
+                } else {
+                    $confluence += 1; // Different type but same direction = weaker confluence
+                }
             }
         }
         
         return $confluence;
+    }
+    
+    /**
+     * Calculate signal confluence across timeframes (legacy method)
+     */
+    private function calculateSignalConfluence(array $signal, array $allSignals): int
+    {
+        return $this->calculateEnhancedSignalConfluence($signal, $allSignals);
+    }
+    
+    /**
+     * Additional quality checks for signals
+     */
+    private function passesQualityChecks(array $signal): bool
+    {
+        // Check 1: Signal must have a valid strength
+        if (!isset($signal['strength']) || $signal['strength'] <= 0) {
+            $this->logger->info("❌ [QUALITY] Signal missing or invalid strength");
+            return false;
+        }
+        
+        // Check 2: Signal must have a valid direction
+        if (!isset($signal['direction']) || !in_array($signal['direction'], ['bullish', 'bearish', 'long', 'short'])) {
+            $this->logger->info("❌ [QUALITY] Signal missing or invalid direction");
+            return false;
+        }
+        
+        // Check 3: Signal must have a valid price/level
+        if (!isset($signal['price']) && !isset($signal['level'])) {
+            $this->logger->info("❌ [QUALITY] Signal missing price/level information");
+            return false;
+        }
+        
+        // Check 4: For engulfing patterns, verify engulfing data integrity
+        if (in_array($signal['type'], ['Engulfing_Bullish', 'Engulfing_Bearish'])) {
+            if (!isset($signal['engulfing_data']) || !is_array($signal['engulfing_data'])) {
+                $this->logger->info("❌ [QUALITY] Engulfing signal missing required data");
+                return false;
+            }
+            
+            $bodyRatio = $signal['engulfing_data']['body_ratio'] ?? 0;
+            if ($bodyRatio < config('micro_trading.signal_settings.engulfing_min_body_ratio', 0.7)) {
+                $this->logger->info("❌ [QUALITY] Engulfing body ratio too low: {$bodyRatio}");
+                return false;
+            }
+        }
+        
+        $this->logger->info("✅ [QUALITY] Signal passed all quality checks");
+        return true;
+    }
+    
+    /**
+     * Calculate overall filter score for signal ranking
+     */
+    private function calculateFilterScore(array $signal): float
+    {
+        $score = 0;
+        
+        // Base score from signal strength (50% weight)
+        $score += ($signal['strength'] ?? 0) * 0.5;
+        
+        // Confluence bonus (20% weight)
+        $confluenceScore = min(1.0, ($signal['confluence'] ?? 0) / 3); // Max 3 confluence
+        $score += $confluenceScore * 0.2;
+        
+        // Signal type priority (20% weight)
+        $typePriority = $this->getSignalTypePriority($signal['type']);
+        $score += $typePriority * 0.2;
+        
+        // Quality factors (10% weight)
+        if (isset($signal['quality_factors']) && is_array($signal['quality_factors'])) {
+            $qualityScore = 0;
+            $factorCount = 0;
+            
+            foreach ($signal['quality_factors'] as $factor => $value) {
+                if (is_bool($value)) {
+                    $qualityScore += $value ? 1 : 0;
+                } elseif (is_numeric($value)) {
+                    $qualityScore += min(1.0, max(0.0, $value));
+                }
+                $factorCount++;
+            }
+            
+            if ($factorCount > 0) {
+                $score += ($qualityScore / $factorCount) * 0.1;
+            }
+        }
+        
+        return min(1.0, $score);
+    }
+    
+    /**
+     * Get signal type priority for ranking
+     */
+    private function getSignalTypePriority(string $type): float
+    {
+        $priorities = [
+            'Engulfing_Bullish' => 1.0,      // Highest priority - user requested
+            'Engulfing_Bearish' => 1.0,      // Highest priority - user requested
+            'OrderBlock_Support' => 0.9,     // High priority
+            'OrderBlock_Resistance' => 0.9,  // High priority
+            'OrderBlock_Breakout' => 0.8,    // Good priority
+            'BOS' => 0.7,                    // Medium priority
+            'CHoCH' => 0.7,                  // Medium priority
+        ];
+        
+        return $priorities[$type] ?? 0.5;
     }
 
     /**
@@ -398,8 +528,8 @@ class FuturesTradingBotService
         // Close any existing position first
         $this->closeExistingPosition();
 
-        // Calculate position size
-        $positionSize = $this->calculatePositionSize($currentPrice);
+        // Calculate position size with signal-based dynamic sizing
+        $positionSize = $this->calculatePositionSize($currentPrice, $signal);
         
         $this->logger->info("💰 [POSITION SIZE] Calculated position size: {$positionSize}");
         
@@ -410,15 +540,24 @@ class FuturesTradingBotService
         
         $this->logger->info("✅ [POSITION SIZE] Position size check passed");
         
-        // Calculate stop loss and take profit
+        // Calculate stop loss and take profit (now supports multi-TP)
         $stopLoss = $this->calculateStopLoss($signal, $currentPrice);
-        $takeProfit = $this->calculateTakeProfit($signal, $currentPrice);
+        $takeProfitLevels = $this->calculateTakeProfit($signal, $currentPrice);
         
-        $this->logger->info("🎯 [RISK MANAGEMENT] Calculated Stop Loss: {$stopLoss}, Take Profit: {$takeProfit}");
+        // Log the multi-TP setup
+        if (count($takeProfitLevels) > 1) {
+            $this->logger->info("🎯 [MULTI-TP] Calculated Stop Loss: {$stopLoss}");
+            foreach ($takeProfitLevels as $tpLevel) {
+                $this->logger->info("🎯 [MULTI-TP] {$tpLevel['level']}: Price {$tpLevel['price']} ({$tpLevel['target_percentage']}%), Close {$tpLevel['position_percentage']}%");
+            }
+        } else {
+            $this->logger->info("🎯 [RISK MANAGEMENT] Calculated Stop Loss: {$stopLoss}, Take Profit: {$takeProfitLevels[0]['price']}");
+        }
         
-        // Validate risk/reward ratio
-        $riskRewardRatio = $this->calculateRiskRewardRatio($currentPrice, $stopLoss, $takeProfit);
-        $this->logger->info("📊 [RISK/REWARD] Calculated ratio: {$riskRewardRatio}");
+        // Validate risk/reward ratio using the first (closest) take profit
+        $primaryTakeProfit = $takeProfitLevels[0]['price'];
+        $riskRewardRatio = $this->calculateRiskRewardRatio($currentPrice, $stopLoss, $primaryTakeProfit);
+        $this->logger->info("📊 [RISK/REWARD] Calculated ratio (TP1): {$riskRewardRatio}");
         
         // Use bot's minimum risk/reward ratio configuration
         $minRiskReward = $this->bot->min_risk_reward_ratio;
@@ -432,18 +571,18 @@ class FuturesTradingBotService
         
         // Place the futures order with stop loss and take profit
         $this->logger->info("📤 [ORDER] Attempting to place futures order...");
-        $order = $this->placeFuturesOrder($signal, $positionSize, $stopLoss, $takeProfit);
+        $order = $this->placeFuturesOrder($signal, $positionSize, $stopLoss, $takeProfitLevels);
         
         if ($order) {
             $this->logger->info("✅ [ORDER] Futures order placed successfully: " . json_encode($order));
             
             // Save trade to database
             $this->logger->info("💾 [DATABASE] Saving trade to database...");
-            $this->saveFuturesTrade($signal, $order, $currentPrice, $stopLoss, $takeProfit);
+            $this->saveFuturesTrade($signal, $order, $currentPrice, $stopLoss, $takeProfitLevels);
             
             // Save signal
             $this->logger->info("💾 [DATABASE] Saving signal to database...");
-            $this->saveFuturesSignal($signal, $currentPrice, $stopLoss, $takeProfit, $riskRewardRatio);
+            $this->saveFuturesSignal($signal, $currentPrice, $stopLoss, $takeProfitLevels, $riskRewardRatio);
             
             $this->logger->info("🎉 [SUCCESS] Complete trade process finished successfully");
         } else {
@@ -514,9 +653,9 @@ class FuturesTradingBotService
     }
 
     /**
-     * Calculate position size based on risk management for futures
+     * Calculate position size based on enhanced risk management - IMPROVED VERSION
      */
-    private function calculatePositionSize(float $currentPrice): float
+    private function calculatePositionSize(float $currentPrice, array $signal = null): float
     {
         $balance = $this->exchangeService->getFuturesBalance();
         $usdtBalance = 0;
@@ -532,56 +671,192 @@ class FuturesTradingBotService
             }
         }
         
-        $this->logger->info("Balance calculation: USDT Balance = {$usdtBalance}, Current Price = {$currentPrice}");
+        $this->logger->info("💰 [BALANCE] USDT Balance = {$usdtBalance}, Current Price = {$currentPrice}");
         
         if ($usdtBalance <= 0) {
-            $this->logger->warning("No USDT balance available for futures");
+            $this->logger->warning("❌ [BALANCE] No USDT balance available for futures");
             return 0;
         }
         
-        // Calculate position size based on risk percentage and leverage
-        $riskAmount = $usdtBalance * ($this->bot->risk_percentage / 100);
+        // Enhanced position sizing based on signal quality and market conditions
+        $baseRiskPercentage = $this->bot->risk_percentage;
+        $adjustedRiskPercentage = $this->calculateDynamicRisk($baseRiskPercentage, $signal);
+        
+        $this->logger->info("📊 [RISK] Base risk: {$baseRiskPercentage}%, Adjusted risk: {$adjustedRiskPercentage}%");
+        
+        // Calculate position size with dynamic risk
+        $riskAmount = $usdtBalance * ($adjustedRiskPercentage / 100);
         $positionValue = $riskAmount * $this->bot->leverage;
         $positionSize = $positionValue / $currentPrice;
         
-        $this->logger->info("Position size calculation: Risk Amount = {$riskAmount} USDT, Leverage = {$this->bot->leverage}x, Position Size = {$positionSize}");
+        $this->logger->info("📏 [CALCULATION] Risk Amount = {$riskAmount} USDT, Leverage = {$this->bot->leverage}x, Initial Position Size = {$positionSize}");
         
-        // Apply position sizing rules - USER'S MAX POSITION SIZE IS ABSOLUTE!
-        $maxPositionSize = $this->bot->max_position_size;
-        $minNotionalValue = $this->bot->min_order_value + 0.5;
+        // Apply volatility adjustment if enabled
+        if (config('micro_trading.risk_management.volatility_adjustment', true)) {
+            $volatilityMultiplier = $this->getVolatilityAdjustment($currentPrice);
+            $positionSize *= $volatilityMultiplier;
+            $this->logger->info("📊 [VOLATILITY] Applied volatility multiplier: {$volatilityMultiplier}, Adjusted position: {$positionSize}");
+        }
+        
+        // Apply strict position limits from config
+        $maxPositionSize = config('micro_trading.risk_management.max_position_size', $this->bot->max_position_size);
+        $minNotionalValue = ($this->bot->min_order_value ?? 5) + 0.5;
         $requiredMinPosition = $minNotionalValue / $currentPrice;
         
-        $this->logger->info("📏 [POSITION LIMITS] User's max position: {$maxPositionSize}, Exchange min position needed: {$requiredMinPosition}");
+        $this->logger->info("📏 [LIMITS] Config max position: {$maxPositionSize}, Exchange min position: {$requiredMinPosition}");
         
-        // Step 1: Check if user's max position meets exchange minimum requirements
+        // Validate configuration
         $maxPositionNotional = $maxPositionSize * $currentPrice;
         if ($maxPositionNotional < $minNotionalValue) {
-            $this->logger->error("❌ [CONFIG ERROR] User's max_position_size ({$maxPositionSize}) creates notional value ({$maxPositionNotional} USDT) below exchange minimum ({$minNotionalValue} USDT)");
-            $this->logger->error("❌ [TRADE SKIPPED] Please increase max_position_size to at least " . ceil($requiredMinPosition) . " to enable trading");
+            $this->logger->error("❌ [CONFIG ERROR] Max position size ({$maxPositionSize}) creates notional value ({$maxPositionNotional} USDT) below exchange minimum ({$minNotionalValue} USDT)");
+            $this->logger->error("❌ [TRADE SKIPPED] Increase max_position_size to at least " . ceil($requiredMinPosition * 1.1));
             return 0;
         }
         
-        // Step 2: Apply user's max position size limit (absolute rule)
+        // Apply limits
+        $positionSize = min($positionSize, $maxPositionSize);
+        $positionSize = max($positionSize, $requiredMinPosition);
+        
+        // Final safety check
         if ($positionSize > $maxPositionSize) {
-            $this->logger->info("📏 [MAX POSITION] Risk-based position {$positionSize} exceeds user's max position {$maxPositionSize} - capping to user's limit");
-            $positionSize = $maxPositionSize;
+            $this->logger->error("❌ [SAFETY] Final position size exceeds maximum - using minimum viable position");
+            $positionSize = $requiredMinPosition;
         }
         
-        // Step 3: Ensure position meets exchange minimum (but never exceed user's max)
-        if ($positionSize < $requiredMinPosition) {
-            if ($requiredMinPosition <= $maxPositionSize) {
-                $this->logger->info("📏 [MIN NOTIONAL] Increasing position from {$positionSize} to {$requiredMinPosition} to meet exchange minimum");
-                $positionSize = $requiredMinPosition;
-            } else {
-                // This should never happen due to Step 1 check, but just in case
-                $this->logger->error("❌ [IMPOSSIBLE] Exchange minimum exceeds user's maximum - this should have been caught earlier");
-                return 0;
+        $this->logger->info("✅ [FINAL POSITION] Position size: {$positionSize} (max: {$maxPositionSize}, min: {$requiredMinPosition})");
+        
+        return $positionSize;
+    }
+    
+    /**
+     * Calculate dynamic risk percentage based on signal quality
+     */
+    private function calculateDynamicRisk(float $baseRisk, array $signal = null): float
+    {
+        if (!$signal || !config('micro_trading.risk_management.dynamic_sizing', true)) {
+            return $baseRisk;
+        }
+        
+        $multiplier = 1.0;
+        
+        // Factor 1: Signal strength (higher strength = higher risk)
+        $signalStrength = $signal['strength'] ?? 0;
+        if ($signalStrength >= 0.95) {
+            $multiplier *= 1.2; // +20% for ultra-high quality signals
+        } elseif ($signalStrength >= 0.90) {
+            $multiplier *= 1.1; // +10% for high quality signals
+        } elseif ($signalStrength < 0.85) {
+            $multiplier *= 0.8; // -20% for lower quality signals
+        }
+        
+        // Factor 2: Signal type priority
+        if (isset($signal['type'])) {
+            $typePriority = $this->getSignalTypePriority($signal['type']);
+            if ($typePriority >= 1.0) {
+                $multiplier *= 1.15; // +15% for highest priority signals (engulfing)
+            } elseif ($typePriority >= 0.9) {
+                $multiplier *= 1.05; // +5% for high priority signals
             }
         }
         
-        $this->logger->info("✅ [FINAL POSITION] Position size: {$positionSize} (within user's limit of {$maxPositionSize}, meets exchange minimum)");
+        // Factor 3: Confluence bonus
+        $confluence = $signal['confluence'] ?? 0;
+        if ($confluence >= 3) {
+            $multiplier *= 1.1; // +10% for very high confluence
+        } elseif ($confluence >= 2) {
+            $multiplier *= 1.05; // +5% for good confluence
+        }
         
-        return $positionSize;
+        // Factor 4: Quality factors
+        if (isset($signal['quality_factors']) && is_array($signal['quality_factors'])) {
+            $qualityScore = 0;
+            $factorCount = 0;
+            
+            foreach ($signal['quality_factors'] as $factor => $value) {
+                if (is_bool($value) && $value) {
+                    $qualityScore += 1;
+                } elseif (is_numeric($value)) {
+                    $qualityScore += min(1.0, max(0.0, $value));
+                }
+                $factorCount++;
+            }
+            
+            if ($factorCount > 0) {
+                $avgQuality = $qualityScore / $factorCount;
+                if ($avgQuality >= 0.8) {
+                    $multiplier *= 1.05; // +5% for high quality factors
+                }
+            }
+        }
+        
+        // Apply conservative limits (don't risk more than 2x or less than 0.5x)
+        $multiplier = min(2.0, max(0.5, $multiplier));
+        
+        $adjustedRisk = $baseRisk * $multiplier;
+        
+        // Cap at reasonable maximum (based on analysis showing issues with high frequency)
+        $maxRisk = config('micro_trading.risk_management.max_dynamic_risk', 3.0);
+        $adjustedRisk = min($adjustedRisk, $maxRisk);
+        
+        $this->logger->info("🎯 [DYNAMIC RISK] Multiplier: {$multiplier}, Adjusted risk: {$adjustedRisk}% (base: {$baseRisk}%)");
+        
+        return $adjustedRisk;
+    }
+    
+    /**
+     * Get volatility adjustment multiplier
+     */
+    private function getVolatilityAdjustment(float $currentPrice): float
+    {
+        // Get recent price volatility
+        try {
+            $recentCandles = $this->exchangeService->getCandles(
+                $this->bot->symbol, 
+                '5m', 
+                12 // Last hour of 5m candles
+            );
+            
+            if (count($recentCandles) < 5) {
+                return 1.0; // No adjustment if insufficient data
+            }
+            
+            // Calculate price volatility (standard deviation of returns)
+            $returns = [];
+            for ($i = 1; $i < count($recentCandles); $i++) {
+                $prevClose = $recentCandles[$i-1]['close'];
+                $currentClose = $recentCandles[$i]['close'];
+                if ($prevClose > 0) {
+                    $returns[] = (($currentClose - $prevClose) / $prevClose) * 100;
+                }
+            }
+            
+            if (empty($returns)) {
+                return 1.0;
+            }
+            
+            $avgReturn = array_sum($returns) / count($returns);
+            $variance = array_sum(array_map(function($return) use ($avgReturn) {
+                return pow($return - $avgReturn, 2);
+            }, $returns)) / count($returns);
+            $volatility = sqrt($variance);
+            
+            $this->logger->info("📊 [VOLATILITY] Calculated volatility: {$volatility}%");
+            
+            // Adjust position size based on volatility
+            if ($volatility > 2.0) {
+                return 0.7; // High volatility: reduce position by 30%
+            } elseif ($volatility > 1.0) {
+                return 0.85; // Medium volatility: reduce position by 15%
+            } elseif ($volatility < 0.3) {
+                return 1.15; // Low volatility: increase position by 15%
+            }
+            
+            return 1.0; // Normal volatility: no adjustment
+            
+        } catch (\Exception $e) {
+            $this->logger->warning("⚠️ [VOLATILITY] Failed to calculate volatility adjustment: " . $e->getMessage());
+            return 1.0;
+        }
     }
 
     /**
@@ -632,16 +907,42 @@ class FuturesTradingBotService
             }
         }
         
-        // Fallback to percentage-based stop loss if no SMC levels found
-        $stopLossPercentage = $this->bot->stop_loss_percentage / 100;
+        // Enhanced fallback to percentage-based stop loss with loosened settings
+        $baseStopLossPercentage = config('micro_trading.risk_management.default_stop_loss_percentage', $this->bot->stop_loss_percentage) / 100;
+        $stopLossBuffer = config('micro_trading.risk_management.stop_loss_buffer', 0.5) / 100;
+        
+        // Apply buffer for market noise (addresses tight stop loss issue)
+        $adjustedStopLossPercentage = $baseStopLossPercentage + $stopLossBuffer;
+        
+        // Apply volatility adjustment to stop loss (more conservative)
+        $volatilityMultiplier = $this->getVolatilityAdjustment($currentPrice);
+        
+        // For high volatility, widen stop loss more aggressively; for low volatility, keep reasonable distance
+        if ($volatilityMultiplier < 0.8) { // High volatility detected
+            $adjustedStopLossPercentage *= 1.5; // Widen stop loss by 50% (increased from 30%)
+            $this->logger->info("🌪️ [VOLATILITY SL] High volatility detected - widening stop loss by 50%");
+        } elseif ($volatilityMultiplier > 1.1) { // Low volatility detected
+            $adjustedStopLossPercentage *= 1.0; // No tightening in low volatility (was 0.9)
+            $this->logger->info("🔒 [VOLATILITY SL] Low volatility detected - maintaining standard stop loss");
+        }
+        
+        // Special handling for engulfing patterns - less aggressive tightening
+        if (isset($signal['type']) && in_array($signal['type'], ['Engulfing_Bullish', 'Engulfing_Bearish'])) {
+            $adjustedStopLossPercentage *= 0.95; // Only 5% tighter for engulfing patterns (was 15%)
+            $this->logger->info("🕯️ [ENGULFING SL] Engulfing pattern - using slightly tighter stop loss");
+        }
+        
+        // Ensure minimum stop loss distance (prevent too tight stops)
+        $minStopLossPercentage = 0.025; // Minimum 2.5% stop loss
+        $adjustedStopLossPercentage = max($adjustedStopLossPercentage, $minStopLossPercentage);
         
         if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
-            $fallbackStopLoss = $currentPrice * (1 - $stopLossPercentage);
-            $this->logger->info("Using fallback percentage stop loss: {$fallbackStopLoss}");
+            $fallbackStopLoss = $currentPrice * (1 - $adjustedStopLossPercentage);
+            $this->logger->info("📉 [SL LONG] Enhanced stop loss: {$fallbackStopLoss} (adjusted: " . ($adjustedStopLossPercentage * 100) . "%)");
             return $fallbackStopLoss;
         } else {
-            $fallbackStopLoss = $currentPrice * (1 + $stopLossPercentage);
-            $this->logger->info("Using fallback percentage stop loss: {$fallbackStopLoss}");
+            $fallbackStopLoss = $currentPrice * (1 + $adjustedStopLossPercentage);
+            $this->logger->info("📈 [SL SHORT] Enhanced stop loss: {$fallbackStopLoss} (adjusted: " . ($adjustedStopLossPercentage * 100) . "%)");
             return $fallbackStopLoss;
         }
     }
@@ -649,7 +950,72 @@ class FuturesTradingBotService
     /**
      * Calculate take profit for futures using SMC levels
      */
-    private function calculateTakeProfit(array $signal, float $currentPrice): float
+    private function calculateTakeProfit(array $signal, float $currentPrice): array
+    {
+        $isMultiTpEnabled = config('micro_trading.risk_management.multi_take_profit', false);
+        
+        if (!$isMultiTpEnabled) {
+            // Legacy single take profit logic
+            return $this->calculateSingleTakeProfit($signal, $currentPrice);
+        }
+        
+        // NEW: Multi-level take profit system with position scaling
+        $takeProfitLevels = config('micro_trading.risk_management.take_profit_levels', []);
+        $multiTakeProfits = [];
+        
+        $this->logger->info("🎯 [MULTI-TP] Calculating multi-level take profits with position scaling");
+        
+        // Apply volatility and signal adjustments
+        $volatilityMultiplier = $this->getVolatilityAdjustment($currentPrice);
+        $volatilityAdjustment = 1.0;
+        
+        if ($volatilityMultiplier < 0.8) { // High volatility
+            $volatilityAdjustment = 1.2; // Widen all TPs by 20%
+            $this->logger->info("🌪️ [MULTI-TP] High volatility - widening all TPs by 20%");
+        } elseif ($volatilityMultiplier > 1.1) { // Low volatility
+            $volatilityAdjustment = 0.95; // Slightly tighten all TPs by 5%
+            $this->logger->info("🔒 [MULTI-TP] Low volatility - tightening all TPs by 5%");
+        }
+        
+        // Special handling for engulfing patterns - wider targets
+        $engulfingMultiplier = 1.0;
+        if (isset($signal['type']) && in_array($signal['type'], ['Engulfing_Bullish', 'Engulfing_Bearish'])) {
+            $engulfingMultiplier = 1.15; // 15% wider for engulfing patterns
+            $this->logger->info("🕯️ [MULTI-TP] Engulfing pattern - increasing all TPs by 15%");
+        }
+        
+        foreach ($takeProfitLevels as $level => $config) {
+            $percentage = ($config['percentage'] / 100) * $volatilityAdjustment * $engulfingMultiplier;
+            $positionClose = $config['position_close'];
+            
+            if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
+                $tpPrice = $currentPrice * (1 + $percentage);
+            } else {
+                $tpPrice = $currentPrice * (1 - $percentage);
+            }
+            
+            $multiTakeProfits[] = [
+                'level' => $level,
+                'price' => $tpPrice,
+                'position_percentage' => $positionClose,
+                'target_percentage' => $percentage * 100,
+                'original_percentage' => $config['percentage']
+            ];
+            
+            $this->logger->info("📈 [MULTI-TP] {$level}: Price {$tpPrice} (" . round($percentage * 100, 2) . "%), Close {$positionClose}% of position");
+        }
+        
+        // Add summary
+        $totalPositionClose = array_sum(array_column($multiTakeProfits, 'position_percentage'));
+        $this->logger->info("🎯 [MULTI-TP] Summary: {" . count($multiTakeProfits) . "} levels, {$totalPositionClose}% total position closure");
+        
+        return $multiTakeProfits;
+    }
+    
+    /**
+     * Legacy single take profit calculation
+     */
+    private function calculateSingleTakeProfit(array $signal, float $currentPrice): array
     {
         // Get SMC levels for better take profit placement
         $smcLevels = $this->getSMCLevels();
@@ -667,13 +1033,12 @@ class FuturesTradingBotService
                 });
                 $nearestResistance = $resistanceLevels[0]['price'];
                 
-                // Check if the resistance level provides a reasonable reward (at least 0.5% from current price)
+                // Check if the resistance level provides a reasonable reward
                 $minRewardDistance = $currentPrice * 0.005; // 0.5% minimum reward
                 if (($nearestResistance - $currentPrice) >= $minRewardDistance) {
                     $this->logger->info("SMC Take Profit for long: Using resistance level at {$nearestResistance}");
-                    return $nearestResistance;
-                } else {
-                    $this->logger->info("SMC resistance level too close ({$nearestResistance}), using percentage-based take profit");
+                    $targetPercentage = (($nearestResistance - $currentPrice) / $currentPrice) * 100;
+                    return [['level' => 'single', 'price' => $nearestResistance, 'position_percentage' => 100, 'target_percentage' => $targetPercentage]];
                 }
             }
         } else {
@@ -689,29 +1054,26 @@ class FuturesTradingBotService
                 });
                 $nearestSupport = $supportLevels[0]['price'];
                 
-                // Check if the support level provides a reasonable reward (at least 0.5% from current price)
+                // Check if the support level provides a reasonable reward
                 $minRewardDistance = $currentPrice * 0.005; // 0.5% minimum reward
                 if (($currentPrice - $nearestSupport) >= $minRewardDistance) {
                     $this->logger->info("SMC Take Profit for short: Using support level at {$nearestSupport}");
-                    return $nearestSupport;
-                } else {
-                    $this->logger->info("SMC support level too close ({$nearestSupport}), using percentage-based take profit");
+                    $targetPercentage = (($currentPrice - $nearestSupport) / $currentPrice) * 100;
+                    return [['level' => 'single', 'price' => $nearestSupport, 'position_percentage' => 100, 'target_percentage' => $targetPercentage]];
                 }
             }
         }
         
-        // Fallback to percentage-based take profit if no SMC levels found
-        $takeProfitPercentage = $this->bot->take_profit_percentage / 100;
+        // Fallback to percentage-based take profit
+        $baseTakeProfitPercentage = 0.05; // 5% default for single TP (matches new stop loss)
         
         if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
-            $fallbackTakeProfit = $currentPrice * (1 + $takeProfitPercentage);
-            $this->logger->info("Using fallback percentage take profit: {$fallbackTakeProfit}");
-            return $fallbackTakeProfit;
+            $fallbackTakeProfit = $currentPrice * (1 + $baseTakeProfitPercentage);
         } else {
-            $fallbackTakeProfit = $currentPrice * (1 - $takeProfitPercentage);
-            $this->logger->info("Using fallback percentage take profit: {$fallbackTakeProfit}");
-            return $fallbackTakeProfit;
+            $fallbackTakeProfit = $currentPrice * (1 - $baseTakeProfitPercentage);
         }
+        
+        return [['level' => 'single', 'price' => $fallbackTakeProfit, 'position_percentage' => 100, 'target_percentage' => 5.0]];
     }
 
     /**

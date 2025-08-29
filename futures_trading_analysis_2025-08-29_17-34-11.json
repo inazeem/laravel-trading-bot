@@ -1,0 +1,207 @@
+{
+    "timestamp": "2025-08-29 17:34:10",
+    "analysis_period": {
+        "start": "2025-08-09",
+        "end": "2025-08-29",
+        "days": 20
+    },
+    "bot_configurations": [
+        {
+            "id": 5,
+            "name": "crypto",
+            "symbol": "SUI-USDT",
+            "exchange": "binance",
+            "timeframes": [
+                "1m",
+                "5m",
+                "15m"
+            ],
+            "risk_percentage": 0.5,
+            "leverage": 10,
+            "margin_type": "isolated",
+            "stop_loss_percentage": 1.5,
+            "take_profit_percentage": 7.5,
+            "position_side": "both",
+            "enable_bitcoin_correlation": true,
+            "total_pnl": 0.14496389192752696,
+            "total_trades": 20,
+            "win_rate": 35,
+            "profit_factor": "1.0636"
+        },
+        {
+            "id": 7,
+            "name": "solana",
+            "symbol": "SOL-USDT",
+            "exchange": "binance",
+            "timeframes": [
+                "15m",
+                "30m",
+                "1h"
+            ],
+            "risk_percentage": 2,
+            "leverage": 5,
+            "margin_type": "isolated",
+            "stop_loss_percentage": 2,
+            "take_profit_percentage": 6,
+            "position_side": "both",
+            "enable_bitcoin_correlation": false,
+            "total_pnl": 0,
+            "total_trades": 0,
+            "win_rate": 0,
+            "profit_factor": "0.0000"
+        }
+    ],
+    "trading_performance": {
+        "total_trades": 65,
+        "winning_trades": 7,
+        "losing_trades": 13,
+        "break_even_trades": 45,
+        "win_rate": 10.77,
+        "total_pnl": 0.14496389,
+        "avg_win": 0.34641,
+        "avg_loss": 0.17537739,
+        "profit_factor": 1.98,
+        "daily_trades": 3.3
+    },
+    "symbol_performance": {
+        "SUI-USDT": {
+            "trades": 65,
+            "win_rate": 10.77,
+            "total_pnl": 0.14496389
+        }
+    },
+    "losing_trade_patterns": {
+        "timeframe_losses": {
+            "15m": 5,
+            "5m": 1,
+            "1h": 4
+        },
+        "symbol_losses": {
+            "SUI-USDT": 13
+        },
+        "side_losses": {
+            "short": 7,
+            "long": 6
+        },
+        "common_issues": [
+            "Stop loss too tight: 0.77261988099405%",
+            "Stop loss too tight: -100%",
+            "Poor risk\/reward ratio: -1",
+            "Stop loss too tight: 0.94519650032774%",
+            "Poor risk\/reward ratio: -1",
+            "Stop loss too tight: 0.89715357521262%",
+            "Poor risk\/reward ratio: 1.02",
+            "Stop loss too tight: 0.57380554675575%",
+            "Poor risk\/reward ratio: -1",
+            "Poor risk\/reward ratio: -1",
+            "Poor risk\/reward ratio: -1",
+            "Poor risk\/reward ratio: -1",
+            "Stop loss too tight: 0.59911242603551%",
+            "Stop loss too tight: 0.77014550341845%",
+            "Poor risk\/reward ratio: 1.04"
+        ]
+    },
+    "signal_analysis": {
+        "total_signals": 69,
+        "executed_signals": 68,
+        "execution_rate": 98.55,
+        "signal_type_performance": {
+            "OrderBlock_Breakout": {
+                "total_signals": 29,
+                "executed_signals": 29,
+                "win_rate": 0,
+                "total_pnl": 0
+            },
+            "BOS": {
+                "total_signals": 1,
+                "executed_signals": 0,
+                "win_rate": 0,
+                "total_pnl": 0
+            },
+            "OrderBlock_Support": {
+                "total_signals": 10,
+                "executed_signals": 10,
+                "win_rate": 0,
+                "total_pnl": 0
+            },
+            "OrderBlock_Resistance": {
+                "total_signals": 29,
+                "executed_signals": 29,
+                "win_rate": 0,
+                "total_pnl": 0
+            }
+        },
+        "timeframe_performance": {
+            "15m": {
+                "total_signals": 48,
+                "executed_signals": 48,
+                "win_rate": 0,
+                "total_pnl": 0
+            },
+            "1h": {
+                "total_signals": 5,
+                "executed_signals": 4,
+                "win_rate": 0,
+                "total_pnl": 0
+            },
+            "5m": {
+                "total_signals": 15,
+                "executed_signals": 15,
+                "win_rate": 0,
+                "total_pnl": 0
+            },
+            "30m": {
+                "total_signals": 1,
+                "executed_signals": 1,
+                "win_rate": 0,
+                "total_pnl": 0
+            }
+        }
+    },
+    "risk_management": {
+        "avg_risk_reward_ratio": 3.65,
+        "stop_loss_hits": 6,
+        "take_profit_hits": 9,
+        "max_drawdown": 1.841,
+        "sl_to_tp_ratio": 0.67
+    },
+    "market_conditions": {
+        "bitcoin_correlation_enabled": true,
+        "correlation_trades": 65,
+        "correlation_win_rate": 10.77
+    },
+    "technical_indicator_performance": {
+        "0": {
+            "count": 54,
+            "wins": 0,
+            "total_pnl": 0,
+            "win_rate": 0
+        },
+        "1": {
+            "count": 2,
+            "wins": 0,
+            "total_pnl": 0,
+            "win_rate": 0
+        },
+        "163249": {
+            "count": 2,
+            "wins": 0,
+            "total_pnl": 0,
+            "win_rate": 0
+        },
+        "635040": {
+            "count": 2,
+            "wins": 0,
+            "total_pnl": 0,
+            "win_rate": 0
+        }
+    },
+    "recommendations": [
+        {
+            "priority": "HIGH",
+            "category": "Signal Quality",
+            "issue": "Low win rate (10.77%)",
+            "recommendation": "Increase signal strength requirement from 80% to 85-90% to filter out weaker signals"
+        }
+    ]
+}
