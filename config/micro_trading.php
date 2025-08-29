@@ -31,7 +31,7 @@ return [
     // Signal generation settings for HIGH-PRECISION trading
     'signal_settings' => [
         'min_strength_threshold' => 0.7,  // 70% - Strong signals only (quality over quantity)
-        'high_strength_requirement' => 0.90,  // 90% - Absolute strongest signals for 5:1 R/R
+        'high_strength_requirement' => 0.80,  // 80% - Absolute strongest signals for 5:1 R/R
         'min_confluence' => 1,  // Single timeframe confirmation for faster execution
         'max_trade_duration_hours' => 4,  // Longer duration for 7.5% take profit targets
     ],
