@@ -1213,6 +1213,149 @@ class ExchangeService
      */
     public function placeStopLossOrder($symbol, $side, $quantity, $stopLoss, $timestamp = null)
     {
+        try {
+            Log::info("Placing stop loss order: {$side} {$symbol} Qty: {$quantity} @ {$stopLoss}");
+            
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->placeKuCoinStopLossOrder($symbol, $side, $quantity, $stopLoss);
+                case 'binance':
+                    return $this->placeBinanceStopLossOrderDirect($symbol, $side, $quantity, $stopLoss, $timestamp);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error placing stop loss order: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Place KuCoin stop loss order
+     */
+    private function placeKuCoinStopLossOrder($symbol, $side, $quantity, $stopLoss)
+    {
+        try {
+            // Convert symbol format for KuCoin
+            $kucoinSymbol = str_replace('-', 'USDT', $symbol) . 'M'; // e.g., SOL-USDT -> SOLUSDTM
+            
+            // For stop loss, we need to reverse the side
+            $slSide = $side === 'buy' ? 'sell' : 'buy';
+            
+            $endpoint = '/api/v1/orders';
+            $timestamp = round(microtime(true) * 1000);
+            
+            $orderData = [
+                'clientOid' => uniqid(),
+                'side' => $slSide,
+                'symbol' => $kucoinSymbol,
+                'type' => 'market',
+                'size' => (string)$quantity,
+                'stop' => 'loss',
+                'stopPrice' => (string)$stopLoss,
+                'reduceOnly' => true
+            ];
+            
+            $body = json_encode($orderData);
+            $passphrase = base64_encode(hash_hmac('sha256', $this->passphrase, $this->secretKey, true));
+            $signaturePayload = $timestamp . 'POST' . $endpoint . $body;
+            $signature = base64_encode(hash_hmac('sha256', $signaturePayload, $this->secretKey, true));
+            
+            Log::info("Placing KuCoin stop loss order: " . $body);
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $passphrase,
+                'KC-API-KEY-VERSION' => '2',
+                'Content-Type' => 'application/json'
+            ])->post('https://api-futures.kucoin.com' . $endpoint, $orderData);
+            
+            Log::info("KuCoin stop loss order response: " . $response->body());
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                if (isset($data['data']['orderId'])) {
+                    Log::info("KuCoin stop loss order placed successfully: " . $data['data']['orderId']);
+                    return $data['data']['orderId'];
+                }
+            }
+            
+            Log::error("KuCoin stop loss order failed: " . $response->body());
+            return null;
+            
+        } catch (\Exception $e) {
+            Log::error("Error placing KuCoin stop loss order: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Place KuCoin take profit order
+     */
+    private function placeKuCoinTakeProfitOrder($symbol, $side, $quantity, $takeProfit)
+    {
+        try {
+            // Convert symbol format for KuCoin
+            $kucoinSymbol = str_replace('-', 'USDT', $symbol) . 'M'; // e.g., SOL-USDT -> SOLUSDTM
+            
+            // For take profit, we need to reverse the side
+            $tpSide = $side === 'buy' ? 'sell' : 'buy';
+            
+            $endpoint = '/api/v1/orders';
+            $timestamp = round(microtime(true) * 1000);
+            
+            $orderData = [
+                'clientOid' => uniqid(),
+                'side' => $tpSide,
+                'symbol' => $kucoinSymbol,
+                'type' => 'limit',
+                'size' => (string)$quantity,
+                'price' => (string)$takeProfit,
+                'reduceOnly' => true
+            ];
+            
+            $body = json_encode($orderData);
+            $passphrase = base64_encode(hash_hmac('sha256', $this->passphrase, $this->secretKey, true));
+            $signaturePayload = $timestamp . 'POST' . $endpoint . $body;
+            $signature = base64_encode(hash_hmac('sha256', $signaturePayload, $this->secretKey, true));
+            
+            Log::info("Placing KuCoin take profit order: " . $body);
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $passphrase,
+                'KC-API-KEY-VERSION' => '2',
+                'Content-Type' => 'application/json'
+            ])->post('https://api-futures.kucoin.com' . $endpoint, $orderData);
+            
+            Log::info("KuCoin take profit order response: " . $response->body());
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                if (isset($data['data']['orderId'])) {
+                    Log::info("KuCoin take profit order placed successfully: " . $data['data']['orderId']);
+                    return $data['data']['orderId'];
+                }
+            }
+            
+            Log::error("KuCoin take profit order failed: " . $response->body());
+            return null;
+            
+        } catch (\Exception $e) {
+            Log::error("Error placing KuCoin take profit order: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Place Binance stop loss order
+     */
+    private function placeBinanceStopLossOrderDirect($symbol, $side, $quantity, $stopLoss, $timestamp = null)
+    {
         // Generate timestamp if not provided
         if ($timestamp === null) {
             $serverTimeResponse = Http::get('https://fapi.binance.com/fapi/v1/time');
@@ -1270,6 +1413,28 @@ class ExchangeService
      * Place take profit order
      */
     public function placeTakeProfitOrder($symbol, $side, $quantity, $takeProfit, $timestamp = null)
+    {
+        try {
+            Log::info("Placing take profit order: {$side} {$symbol} Qty: {$quantity} @ {$takeProfit}");
+            
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->placeKuCoinTakeProfitOrder($symbol, $side, $quantity, $takeProfit);
+                case 'binance':
+                    return $this->placeBinanceTakeProfitOrderDirect($symbol, $side, $quantity, $takeProfit, $timestamp);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error placing take profit order: " . $e->getMessage());
+            return null;
+        }
+    }
+    
+    /**
+     * Place Binance take profit order
+     */
+    private function placeBinanceTakeProfitOrderDirect($symbol, $side, $quantity, $takeProfit, $timestamp = null)
     {
         // Generate timestamp if not provided
         if ($timestamp === null) {
