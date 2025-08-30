@@ -344,4 +344,106 @@ class FuturesTradingBotController extends Controller
             return back()->with('error', 'Failed to close position: ' . $e->getMessage());
         }
     }
+
+    /**
+     * Place manual trade ignoring signals but calculating SL/TP
+     */
+    public function manualTrade(Request $request, FuturesTradingBot $futuresBot)
+    {
+        // Ensure user owns this bot
+        if ($futuresBot->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        $request->validate([
+            'direction' => 'required|in:long,short'
+        ]);
+
+        try {
+            $futuresBot->load('apiKey');
+            $service = new \App\Services\FuturesTradingBotService($futuresBot);
+            $exchangeService = new \App\Services\ExchangeService($futuresBot->apiKey);
+
+            // Get current price
+            $currentPrice = $exchangeService->getCurrentPrice($futuresBot->symbol);
+            if (!$currentPrice) {
+                return back()->with('error', 'Failed to get current price for ' . $futuresBot->symbol);
+            }
+
+            // Create a manual signal
+            $manualSignal = [
+                'direction' => $request->direction === 'long' ? 'bullish' : 'bearish',
+                'type' => 'Manual_Trade',
+                'strength' => 100, // Maximum strength for manual trades
+                'timeframe' => '1h', // Default timeframe
+                'price' => $currentPrice,
+                'confidence' => 1.0, // Maximum confidence
+                'manual' => true // Flag to indicate this is manual
+            ];
+
+            // Close any existing position first
+            $openTrade = $futuresBot->openTrades()->first();
+            if ($openTrade) {
+                $service->closePosition($openTrade, $currentPrice);
+            }
+
+            // Process the manual signal - this will calculate SL/TP and place the trade
+            $service->processSignal($manualSignal);
+
+            return back()->with('success', 'Manual ' . ucfirst($request->direction) . ' trade placed successfully! SL/TP calculated automatically.');
+            
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to place manual trade: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Close all open trades for this bot
+     */
+    public function closeTrades(FuturesTradingBot $futuresBot)
+    {
+        // Ensure user owns this bot
+        if ($futuresBot->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        try {
+            $futuresBot->load('apiKey');
+            $service = new \App\Services\FuturesTradingBotService($futuresBot);
+            $exchangeService = new \App\Services\ExchangeService($futuresBot->apiKey);
+
+            // Get current price for PnL calculation
+            $currentPrice = $exchangeService->getCurrentPrice($futuresBot->symbol);
+            if (!$currentPrice) {
+                return back()->with('error', 'Failed to get current price for ' . $futuresBot->symbol);
+            }
+
+            // Get all open trades
+            $openTrades = $futuresBot->openTrades()->get();
+            
+            if ($openTrades->isEmpty()) {
+                return back()->with('info', 'No open trades to close.');
+            }
+
+            $closedCount = 0;
+            foreach ($openTrades as $trade) {
+                try {
+                    $service->closePosition($trade, $currentPrice);
+                    $closedCount++;
+                } catch (\Exception $e) {
+                    // Continue closing other trades even if one fails
+                    \Log::error("Failed to close trade {$trade->id}: " . $e->getMessage());
+                }
+            }
+
+            if ($closedCount > 0) {
+                return back()->with('success', "Successfully closed {$closedCount} trade(s).");
+            } else {
+                return back()->with('error', 'Failed to close any trades. Check logs for details.');
+            }
+            
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to close trades: ' . $e->getMessage());
+        }
+    }
 }

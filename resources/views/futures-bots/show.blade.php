@@ -4,7 +4,7 @@
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">
                 {{ __('Futures Trading Bot Details') }}
             </h2>
-            <div class="flex space-x-3">
+            <div class="flex flex-wrap gap-3">
                 <a href="{{ route('futures-bots.edit', $futuresBot) }}" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
                     <i class="fas fa-edit mr-2"></i>Edit Bot
                 </a>
@@ -15,6 +15,33 @@
                             <i class="fas fa-play mr-2"></i>Run Bot
                         </button>
                     </form>
+                    
+                    <!-- Manual Trade Buttons -->
+                    <form method="POST" action="{{ route('futures-bots.manual-trade', $futuresBot) }}" class="inline">
+                        @csrf
+                        <input type="hidden" name="direction" value="long">
+                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200"
+                            onclick="return confirm('Place manual LONG trade? This will ignore signals and calculate SL/TP automatically.')">
+                            <i class="fas fa-arrow-up mr-2"></i>Manual Long
+                        </button>
+                    </form>
+                    <form method="POST" action="{{ route('futures-bots.manual-trade', $futuresBot) }}" class="inline">
+                        @csrf
+                        <input type="hidden" name="direction" value="short">
+                        <button type="submit" class="bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200"
+                            onclick="return confirm('Place manual SHORT trade? This will ignore signals and calculate SL/TP automatically.')">
+                            <i class="fas fa-arrow-down mr-2"></i>Manual Short
+                        </button>
+                    </form>
+                    @if($stats['open_trades'] > 0)
+                        <form method="POST" action="{{ route('futures-bots.close-trades', $futuresBot) }}" class="inline">
+                            @csrf
+                            <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200"
+                                onclick="return confirm('Close all open trades immediately? This action cannot be undone.')">
+                                <i class="fas fa-times-circle mr-2"></i>Close All Trades
+                            </button>
+                        </form>
+                    @endif
                 @endif
                 <form method="POST" action="{{ route('futures-bots.destroy', $futuresBot) }}" class="inline" 
                     onsubmit="return confirm('Are you sure you want to delete this futures trading bot? This action cannot be undone and will delete all associated trades, signals, and logs.')">
