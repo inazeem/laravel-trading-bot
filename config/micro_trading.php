@@ -38,6 +38,7 @@ return [
         'engulfing_min_body_ratio' => 0.7,  // Minimum body ratio for engulfing pattern
     ],
 
+    
     // Risk management with DYNAMIC PRICE-BASED SL/TP ADJUSTMENT
     'risk_management' => [
         'default_stop_loss_percentage' => 5.0,  // Fallback if no price tier matches

@@ -562,9 +562,20 @@ class FuturesTradingBotService
         
         $this->logger->info("✅ [POSITION SIZE] Position size check passed");
         
-        // Calculate stop loss and take profit (now supports multi-TP)
-        $stopLoss = $this->calculateStopLoss($signal, $currentPrice);
-        $takeProfitLevels = $this->calculateTakeProfit($signal, $currentPrice);
+        // Calculate stop loss and take profit (now supports multi-TP) with SMC rejection
+        try {
+            $stopLoss = $this->calculateStopLoss($signal, $currentPrice);
+            $takeProfitLevels = $this->calculateTakeProfit($signal, $currentPrice);
+        } catch (\Exception $e) {
+            if (strpos($e->getMessage(), 'SMC_') === 0) {
+                // SMC rejection - log and skip this trade
+                $this->logger->warning("🚫 [TRADE REJECTED] {$e->getMessage()} - Waiting for better setup with adequate risk/reward");
+                return;
+            } else {
+                // Other error - re-throw
+                throw $e;
+            }
+        }
         
         // Log the multi-TP setup
         if (count($takeProfitLevels) > 1) {
@@ -954,6 +965,10 @@ class FuturesTradingBotService
      */
     private function calculateStopLoss(array $signal, float $currentPrice): float
     {
+        // Get price-based adjustment first
+        $priceAdjustment = $this->getPriceBasedAdjustment($currentPrice);
+        $minSlPercentage = $priceAdjustment['stop_loss_percentage'] / 100;
+        
         // Get SMC levels for better stop loss placement
         $smcLevels = $this->getSMCLevels();
         
@@ -971,10 +986,18 @@ class FuturesTradingBotService
                 $nearestSupport = $supportLevels[0]['price'];
                 
                 // Add a small buffer below the support level
-                $stopLoss = $nearestSupport * 0.995; // 0.5% below support
+                $smcStopLoss = $nearestSupport * 0.995; // 0.5% below support
                 
-                $this->logger->info("SMC Stop Loss for long: Using support level at {$nearestSupport}, stop loss set at {$stopLoss}");
-                return $stopLoss;
+                // Check if SMC level respects our minimum distance requirement
+                $slDistance = ($currentPrice - $smcStopLoss) / $currentPrice;
+                if ($slDistance >= $minSlPercentage) {
+                    $this->logger->info("✅ SMC Stop Loss for long: Using support level at {$nearestSupport}, stop loss set at {$smcStopLoss} (" . round($slDistance*100, 2) . "%)");
+                    return $smcStopLoss;
+                } else {
+                    $this->logger->warning("❌ [SMC REJECTION] Support level too close (" . round($slDistance*100, 2) . "%) - minimum required: (" . round($minSlPercentage*100, 2) . "%)");
+                    $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate risk management - skipping this trade opportunity");
+                    throw new \Exception("SMC_STOP_LOSS_TOO_CLOSE");
+                }
             }
         } else {
             // For short positions, find the nearest resistance level above current price
@@ -990,10 +1013,18 @@ class FuturesTradingBotService
                 $nearestResistance = $resistanceLevels[0]['price'];
                 
                 // Add a small buffer above the resistance level
-                $stopLoss = $nearestResistance * 1.005; // 0.5% above resistance
+                $smcStopLoss = $nearestResistance * 1.005; // 0.5% above resistance
                 
-                $this->logger->info("SMC Stop Loss for short: Using resistance level at {$nearestResistance}, stop loss set at {$stopLoss}");
-                return $stopLoss;
+                // Check if SMC level respects our minimum distance requirement
+                $slDistance = ($smcStopLoss - $currentPrice) / $currentPrice;
+                if ($slDistance >= $minSlPercentage) {
+                    $this->logger->info("✅ SMC Stop Loss for short: Using resistance level at {$nearestResistance}, stop loss set at {$smcStopLoss} (" . round($slDistance*100, 2) . "%)");
+                    return $smcStopLoss;
+                } else {
+                    $this->logger->warning("❌ [SMC REJECTION] Resistance level too close (" . round($slDistance*100, 2) . "%) - minimum required: (" . round($minSlPercentage*100, 2) . "%)");
+                    $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate risk management - skipping this trade opportunity");
+                    throw new \Exception("SMC_STOP_LOSS_TOO_CLOSE");
+                }
             }
         }
         
@@ -1112,6 +1143,10 @@ class FuturesTradingBotService
      */
     private function calculateSingleTakeProfit(array $signal, float $currentPrice): array
     {
+        // Get price-based adjustment first
+        $priceAdjustment = $this->getPriceBasedAdjustment($currentPrice);
+        $minTpPercentage = $priceAdjustment['take_profit_percentage'] / 100;
+        
         // Get SMC levels for better take profit placement
         $smcLevels = $this->getSMCLevels();
         
@@ -1128,12 +1163,16 @@ class FuturesTradingBotService
                 });
                 $nearestResistance = $resistanceLevels[0]['price'];
                 
-                // Check if the resistance level provides a reasonable reward
-                $minRewardDistance = $currentPrice * 0.005; // 0.5% minimum reward
-                if (($nearestResistance - $currentPrice) >= $minRewardDistance) {
-                    $this->logger->info("SMC Take Profit for long: Using resistance level at {$nearestResistance}");
-                    $targetPercentage = (($nearestResistance - $currentPrice) / $currentPrice) * 100;
+                // Check if the resistance level provides adequate reward based on price tier
+                $tpDistance = ($nearestResistance - $currentPrice) / $currentPrice;
+                if ($tpDistance >= $minTpPercentage) {
+                    $this->logger->info("✅ SMC Take Profit for long: Using resistance level at {$nearestResistance} (" . round($tpDistance*100, 2) . "%)");
+                    $targetPercentage = $tpDistance * 100;
                     return [['level' => 'single', 'price' => $nearestResistance, 'position_percentage' => 100, 'target_percentage' => $targetPercentage]];
+                } else {
+                    $this->logger->warning("❌ [SMC REJECTION] Resistance level too close (" . round($tpDistance*100, 2) . "%) - minimum required: (" . round($minTpPercentage*100, 2) . "%)");
+                    $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate profit potential - skipping this trade opportunity");
+                    throw new \Exception("SMC_TAKE_PROFIT_TOO_CLOSE");
                 }
             }
         } else {
@@ -1149,12 +1188,16 @@ class FuturesTradingBotService
                 });
                 $nearestSupport = $supportLevels[0]['price'];
                 
-                // Check if the support level provides a reasonable reward
-                $minRewardDistance = $currentPrice * 0.005; // 0.5% minimum reward
-                if (($currentPrice - $nearestSupport) >= $minRewardDistance) {
-                    $this->logger->info("SMC Take Profit for short: Using support level at {$nearestSupport}");
-                    $targetPercentage = (($currentPrice - $nearestSupport) / $currentPrice) * 100;
+                // Check if the support level provides adequate reward based on price tier
+                $tpDistance = ($currentPrice - $nearestSupport) / $currentPrice;
+                if ($tpDistance >= $minTpPercentage) {
+                    $this->logger->info("✅ SMC Take Profit for short: Using support level at {$nearestSupport} (" . round($tpDistance*100, 2) . "%)");
+                    $targetPercentage = $tpDistance * 100;
                     return [['level' => 'single', 'price' => $nearestSupport, 'position_percentage' => 100, 'target_percentage' => $targetPercentage]];
+                } else {
+                    $this->logger->warning("❌ [SMC REJECTION] Support level too close (" . round($tpDistance*100, 2) . "%) - minimum required: (" . round($minTpPercentage*100, 2) . "%)");
+                    $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate profit potential - skipping this trade opportunity");
+                    throw new \Exception("SMC_TAKE_PROFIT_TOO_CLOSE");
                 }
             }
         }
