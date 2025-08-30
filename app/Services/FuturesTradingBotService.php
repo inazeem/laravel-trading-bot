@@ -581,8 +581,11 @@ class FuturesTradingBotService
         $riskRewardRatio = $this->calculateRiskRewardRatio($currentPrice, $stopLoss, $primaryTakeProfit);
         $this->logger->info("📊 [RISK/REWARD] Calculated ratio (TP1): {$riskRewardRatio}");
         
-        // Use bot's minimum risk/reward ratio configuration
-        $minRiskReward = $this->bot->min_risk_reward_ratio;
+        // Use price-based minimum risk/reward ratio configuration
+        $priceAdjustment = $this->getPriceBasedAdjustment($currentPrice);
+        $minRiskReward = $priceAdjustment['min_risk_reward_ratio'];
+        
+        $this->logger->info("🎯 [PRICE-BASED RR] Using {$priceAdjustment['tier']} tier minimum R/R: {$minRiskReward}");
         
         if ($riskRewardRatio < $minRiskReward) {
             $this->logger->info("❌ [RISK/REWARD] Risk/reward ratio too low: {$riskRewardRatio} (minimum: {$minRiskReward}) - skipping trade");
@@ -756,10 +759,15 @@ class FuturesTradingBotService
             return 0; // Don't trade if user's config is below minimum
         }
         
-        // Use user's configured max position size - NEVER override it
-        $positionSize = min($positionSize, $maxPositionSize);
+        // Check if calculated position size meets minimum notional value
+        $finalNotionalValue = $positionSize * $currentPrice;
+        if ($finalNotionalValue < $minNotionalValue) {
+            $this->logger->error("❌ [NOTIONAL ERROR] Calculated position creates notional value ({$finalNotionalValue} USDT) below exchange minimum ({$minNotionalValue} USDT)");
+            $this->logger->error("❌ [SUGGESTION] Increase risk_percentage or reduce leverage to meet minimum order size");
+            return 0; // Don't trade if notional value is too low
+        }
         
-        $this->logger->info("✅ [FINAL POSITION] Position size: {$positionSize} (max: {$maxPositionSize}, min: {$requiredMinPosition})");
+        $this->logger->info("✅ [FINAL POSITION] Position size: {$positionSize} (notional: {$finalNotionalValue} USDT, max: {$maxPositionSize}, min: {$requiredMinPosition})");
         
         return $positionSize;
     }
@@ -896,7 +904,53 @@ class FuturesTradingBotService
     }
 
     /**
-     * Calculate stop loss for futures using SMC levels
+     * Get price-based adjustment for SL/TP based on asset price
+     */
+    private function getPriceBasedAdjustment(float $currentPrice): array
+    {
+        $priceAdjustmentConfig = config('micro_trading.risk_management.price_based_adjustment');
+        
+        if (!$priceAdjustmentConfig['enable']) {
+            // Return defaults if price adjustment is disabled
+            return [
+                'stop_loss_percentage' => $this->bot->stop_loss_percentage,
+                'take_profit_percentage' => $this->bot->take_profit_percentage,
+                'min_risk_reward_ratio' => $this->bot->min_risk_reward_ratio,
+                'tier' => 'disabled'
+            ];
+        }
+        
+        $priceTiers = $priceAdjustmentConfig['price_tiers'];
+        
+        // Find the appropriate price tier
+        foreach ($priceTiers as $tierName => $tierConfig) {
+            $min = $tierConfig['price_range']['min'];
+            $max = $tierConfig['price_range']['max'];
+            
+            if ($currentPrice >= $min && $currentPrice < $max) {
+                $this->logger->info("💎 [PRICE TIER] Asset price \${$currentPrice} matched tier '{$tierName}': {$tierConfig['description']}");
+                return [
+                    'stop_loss_percentage' => $tierConfig['stop_loss_percentage'],
+                    'take_profit_percentage' => $tierConfig['take_profit_percentage'],
+                    'min_risk_reward_ratio' => $tierConfig['min_risk_reward_ratio'],
+                    'tier' => $tierName,
+                    'description' => $tierConfig['description']
+                ];
+            }
+        }
+        
+        // Fallback to bot's configured values if no tier matches
+        $this->logger->warning("⚠️ [PRICE TIER] No price tier matched for \${$currentPrice}, using bot defaults");
+        return [
+            'stop_loss_percentage' => $this->bot->stop_loss_percentage,
+            'take_profit_percentage' => $this->bot->take_profit_percentage,
+            'min_risk_reward_ratio' => $this->bot->min_risk_reward_ratio,
+            'tier' => 'fallback'
+        ];
+    }
+
+    /**
+     * Calculate stop loss for futures using SMC levels with price-based adjustment
      */
     private function calculateStopLoss(array $signal, float $currentPrice): float
     {
@@ -943,9 +997,12 @@ class FuturesTradingBotService
             }
         }
         
-        // Enhanced fallback to percentage-based stop loss with loosened settings
-        $baseStopLossPercentage = $this->bot->stop_loss_percentage / 100;
+        // Enhanced fallback to percentage-based stop loss with PRICE-BASED adjustment
+        $priceAdjustment = $this->getPriceBasedAdjustment($currentPrice);
+        $baseStopLossPercentage = $priceAdjustment['stop_loss_percentage'] / 100;
         $stopLossBuffer = config('micro_trading.risk_management.stop_loss_buffer', 0.5) / 100;
+        
+        $this->logger->info("🎯 [PRICE-BASED SL] Using {$priceAdjustment['tier']} tier: {$priceAdjustment['stop_loss_percentage']}% SL for \${$currentPrice} asset");
         
         // Apply buffer for market noise (addresses tight stop loss issue)
         $adjustedStopLossPercentage = $baseStopLossPercentage + $stopLossBuffer;
@@ -968,9 +1025,11 @@ class FuturesTradingBotService
             $this->logger->info("🕯️ [ENGULFING SL] Engulfing pattern - using slightly tighter stop loss");
         }
         
-        // Ensure minimum stop loss distance (prevent too tight stops)
-        $minStopLossPercentage = 0.025; // Minimum 2.5% stop loss
+        // Ensure minimum stop loss distance (prevent too tight stops) - varies by price tier
+        $minStopLossPercentage = max(0.015, $baseStopLossPercentage * 0.5); // Minimum 1.5% or 50% of base SL
         $adjustedStopLossPercentage = max($adjustedStopLossPercentage, $minStopLossPercentage);
+        
+        $this->logger->info("🔒 [SL PROTECTION] Min SL: " . ($minStopLossPercentage * 100) . "%, Final SL: " . ($adjustedStopLossPercentage * 100) . "%");
         
         if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
             $fallbackStopLoss = $currentPrice * (1 - $adjustedStopLossPercentage);
@@ -1100,8 +1159,11 @@ class FuturesTradingBotService
             }
         }
         
-        // Fallback to percentage-based take profit
-        $baseTakeProfitPercentage = 0.05; // 5% default for single TP (matches new stop loss)
+        // Fallback to percentage-based take profit with PRICE-BASED adjustment
+        $priceAdjustment = $this->getPriceBasedAdjustment($currentPrice);
+        $baseTakeProfitPercentage = $priceAdjustment['take_profit_percentage'] / 100;
+        
+        $this->logger->info("🎯 [PRICE-BASED TP] Using {$priceAdjustment['tier']} tier: {$priceAdjustment['take_profit_percentage']}% TP for \${$currentPrice} asset");
         
         if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
             $fallbackTakeProfit = $currentPrice * (1 + $baseTakeProfitPercentage);
@@ -1109,7 +1171,7 @@ class FuturesTradingBotService
             $fallbackTakeProfit = $currentPrice * (1 - $baseTakeProfitPercentage);
         }
         
-        return [['level' => 'single', 'price' => $fallbackTakeProfit, 'position_percentage' => 100, 'target_percentage' => 5.0]];
+        return [['level' => 'single', 'price' => $fallbackTakeProfit, 'position_percentage' => 100, 'target_percentage' => $priceAdjustment['take_profit_percentage']]];
     }
 
     /**

@@ -38,22 +38,69 @@ return [
         'engulfing_min_body_ratio' => 0.7,  // Minimum body ratio for engulfing pattern
     ],
 
-    // Risk management with MULTI-LEVEL TAKE PROFITS and WIDER STOP LOSS
+    // Risk management with DYNAMIC PRICE-BASED SL/TP ADJUSTMENT
     'risk_management' => [
-        'default_stop_loss_percentage' => 5.0,  // Widened to 5% for breathing room
-        'multi_take_profit' => true,  // Enable multiple take profit levels
+        'default_stop_loss_percentage' => 5.0,  // Fallback if no price tier matches
+        'multi_take_profit' => false,  // Disabled to prevent quick closures - use bot's configured TP instead
         'take_profit_levels' => [
-            'tp1' => ['percentage' => 3.0, 'position_close' => 40],  // Close 40% at 3% profit
-            'tp2' => ['percentage' => 6.0, 'position_close' => 35],  // Close 35% at 6% profit  
-            'tp3' => ['percentage' => 12.0, 'position_close' => 25], // Close remaining 25% at 12% profit
+            'tp1' => ['percentage' => 8.0, 'position_close' => 30],   // More conservative TP1
+            'tp2' => ['percentage' => 15.0, 'position_close' => 35],  // Higher TP2
+            'tp3' => ['percentage' => 25.0, 'position_close' => 35],  // Much higher TP3
         ],
         'max_position_size' => 0.01,  // Increased since we have better risk management
-        'min_risk_reward_ratio' => 2.4,  // TP1: 3%/5% = 0.6, but overall weighted ratio is ~2.4
+        'min_risk_reward_ratio' => 1.5,  // More realistic for different asset types
         'dynamic_sizing' => true,  // Enable dynamic position sizing based on signal strength
         'volatility_adjustment' => true,  // Adjust SL/TP based on market volatility
         'stop_loss_buffer' => 0.5,  // Additional buffer percentage for market noise
-        'trailing_stop' => true,  // Enable trailing stop after TP1
+        'trailing_stop' => false,  // Disabled to prevent premature closures
         'trailing_stop_distance' => 2.0,  // Trail by 2% after TP1 hit
+        
+        // PRICE-BASED DYNAMIC ADJUSTMENT SYSTEM
+        'price_based_adjustment' => [
+            'enable' => true,
+            'price_tiers' => [
+                // Micro-cap altcoins (< $0.01)
+                'micro' => [
+                    'price_range' => ['min' => 0, 'max' => 0.01],
+                    'stop_loss_percentage' => 8.0,  // Wider SL for high volatility
+                    'take_profit_percentage' => 20.0,  // Higher TP for bigger moves
+                    'min_risk_reward_ratio' => 1.8,
+                    'description' => 'Micro-cap altcoins (under $0.01)'
+                ],
+                // Small altcoins ($0.01 - $1)
+                'small' => [
+                    'price_range' => ['min' => 0.01, 'max' => 1.0],
+                    'stop_loss_percentage' => 6.0,  // Medium SL
+                    'take_profit_percentage' => 15.0,  // Medium TP
+                    'min_risk_reward_ratio' => 1.6,
+                    'description' => 'Small altcoins ($0.01 - $1.00)'
+                ],
+                // Medium altcoins ($1 - $100)
+                'medium' => [
+                    'price_range' => ['min' => 1.0, 'max' => 100.0],
+                    'stop_loss_percentage' => 5.0,  // Moderate SL for medium volatility
+                    'take_profit_percentage' => 12.0,  // Moderate TP
+                    'min_risk_reward_ratio' => 1.5,
+                    'description' => 'Medium altcoins ($1 - $100)'
+                ],
+                // Large cap ($100 - $10k)
+                'large' => [
+                    'price_range' => ['min' => 100.0, 'max' => 10000.0],
+                    'stop_loss_percentage' => 3.0,  // Tight SL
+                    'take_profit_percentage' => 8.0,  // Conservative TP
+                    'min_risk_reward_ratio' => 1.2,
+                    'description' => 'Large cap assets ($100 - $10k)'
+                ],
+                // Ultra large cap (> $10k) - BTC, etc.
+                'ultra' => [
+                    'price_range' => ['min' => 10000.0, 'max' => PHP_FLOAT_MAX],
+                    'stop_loss_percentage' => 2.5,  // Very tight SL
+                    'take_profit_percentage' => 6.0,  // Very conservative TP
+                    'min_risk_reward_ratio' => 1.0,
+                    'description' => 'Ultra large cap assets (> $10k)'
+                ]
+            ]
+        ]
     ],
 
     // Performance optimization
