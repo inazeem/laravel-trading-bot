@@ -440,10 +440,10 @@ class TradingLearningService
             $this->log("🔄 [LEARNING] Adjusting risk percentage: {$this->bot->risk_percentage}% → {$adjustments['risk_percentage']}%");
         }
         
-        // Apply position size adjustment
+        // Apply position size adjustment - DISABLED: Respect user's manual settings
         if (isset($adjustments['max_position_size']) && $adjustments['max_position_size'] != $this->bot->max_position_size) {
-            $updates['max_position_size'] = $adjustments['max_position_size'];
-            $this->log("🔄 [LEARNING] Adjusting max position size: {$this->bot->max_position_size} → {$adjustments['max_position_size']}");
+            // Don't automatically change max_position_size - let user control it
+            $this->log("ℹ️ [LEARNING] Recommended max position size adjustment: {$this->bot->max_position_size} → {$adjustments['max_position_size']} (not applied - user controls this setting)");
         }
         
         // Apply take profit adjustment

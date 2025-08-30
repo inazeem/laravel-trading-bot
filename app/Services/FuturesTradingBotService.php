@@ -724,15 +724,18 @@ class FuturesTradingBotService
             return 0;
         }
         
-        // Apply limits
+        // Apply limits - RESPECT USER'S MAX POSITION SIZE
         $positionSize = min($positionSize, $maxPositionSize);
-        $positionSize = max($positionSize, $requiredMinPosition);
         
-        // Final safety check
-        if ($positionSize > $maxPositionSize) {
-            $this->logger->error("❌ [SAFETY] Final position size exceeds maximum - using minimum viable position");
-            $positionSize = $requiredMinPosition;
+        // Check if the configured max position meets exchange minimum
+        if ($maxPositionSize < $requiredMinPosition) {
+            $this->logger->error("❌ [CONFIG ERROR] User's max_position_size ({$maxPositionSize}) is below exchange minimum ({$requiredMinPosition})");
+            $this->logger->error("❌ [TRADE SKIPPED] Please increase max_position_size to at least {$requiredMinPosition}");
+            return 0; // Don't trade if user's config is below minimum
         }
+        
+        // Use user's configured max position size - NEVER override it
+        $positionSize = min($positionSize, $maxPositionSize);
         
         $this->logger->info("✅ [FINAL POSITION] Position size: {$positionSize} (max: {$maxPositionSize}, min: {$requiredMinPosition})");
         

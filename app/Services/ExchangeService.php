@@ -1784,9 +1784,7 @@ class ExchangeService
         try {
             switch ($this->exchange) {
                 case 'kucoin':
-                    // Mock success
-                    Log::info("[CANCEL] KuCoin cancel order (mock) for {$symbol} orderId {$orderId}");
-                    return true;
+                    return $this->cancelKuCoinOrder($symbol, $orderId);
                 case 'binance':
                     return $this->cancelBinanceOrder($symbol, $orderId);
                 default:
@@ -1806,9 +1804,7 @@ class ExchangeService
         try {
             switch ($this->exchange) {
                 case 'kucoin':
-                    // Mock success
-                    Log::info("[CANCEL ALL] KuCoin cancel all (mock) for {$symbol}");
-                    return true;
+                    return $this->cancelKuCoinAllOpenOrders($symbol);
                 case 'binance':
                     return $this->cancelBinanceAllOpenOrders($symbol);
                 default:
@@ -1816,6 +1812,102 @@ class ExchangeService
             }
         } catch (\Exception $e) {
             Log::error("Error cancelling all open orders for {$symbol}: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Cancel a KuCoin futures order
+     */
+    private function cancelKuCoinOrder($symbol, $orderId): bool
+    {
+        try {
+            $endpoint = "/api/v1/orders/{$orderId}";
+            $timestamp = round(microtime(true) * 1000);
+            
+            // No body for DELETE request
+            $passphrase = base64_encode(hash_hmac('sha256', $this->passphrase, $this->secretKey, true));
+            $signaturePayload = $timestamp . 'DELETE' . $endpoint;
+            $signature = base64_encode(hash_hmac('sha256', $signaturePayload, $this->secretKey, true));
+            
+            Log::info("[CANCEL] Cancelling KuCoin order: {$orderId} for symbol: {$symbol}");
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $passphrase,
+                'KC-API-KEY-VERSION' => '2',
+            ])->delete('https://api-futures.kucoin.com' . $endpoint);
+            
+            Log::info("[CANCEL] KuCoin cancel response: " . $response->body());
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                if (isset($data['data']['cancelledOrderIds']) && in_array($orderId, $data['data']['cancelledOrderIds'])) {
+                    Log::info("[CANCEL] KuCoin order {$orderId} cancelled successfully");
+                    return true;
+                }
+            }
+            
+            Log::error("[CANCEL] KuCoin order {$orderId} cancel failed: " . $response->body());
+            return false;
+            
+        } catch (\Exception $e) {
+            Log::error("[CANCEL] Error cancelling KuCoin order {$orderId}: " . $e->getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Cancel all KuCoin futures orders for a symbol
+     */
+    private function cancelKuCoinAllOpenOrders($symbol): bool
+    {
+        try {
+            // Convert symbol format for KuCoin
+            $kucoinSymbol = str_replace('-', 'USDT', $symbol) . 'M'; // e.g., SOL-USDT -> SOLUSDTM
+            
+            $endpoint = '/api/v1/orders';
+            $timestamp = round(microtime(true) * 1000);
+            
+            // Query parameters for cancelling all orders for symbol
+            $queryParams = [
+                'symbol' => $kucoinSymbol
+            ];
+            $queryString = http_build_query($queryParams);
+            $fullEndpoint = $endpoint . '?' . $queryString;
+            
+            $passphrase = base64_encode(hash_hmac('sha256', $this->passphrase, $this->secretKey, true));
+            $signaturePayload = $timestamp . 'DELETE' . $fullEndpoint;
+            $signature = base64_encode(hash_hmac('sha256', $signaturePayload, $this->secretKey, true));
+            
+            Log::info("[CANCEL ALL] Cancelling all KuCoin orders for symbol: {$kucoinSymbol}");
+            
+            $response = Http::withHeaders([
+                'KC-API-KEY' => $this->apiKey,
+                'KC-API-SIGN' => $signature,
+                'KC-API-TIMESTAMP' => $timestamp,
+                'KC-API-PASSPHRASE' => $passphrase,
+                'KC-API-KEY-VERSION' => '2',
+            ])->delete('https://api-futures.kucoin.com' . $fullEndpoint);
+            
+            Log::info("[CANCEL ALL] KuCoin cancel all response: " . $response->body());
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                if (isset($data['data']['cancelledOrderIds'])) {
+                    $cancelledCount = count($data['data']['cancelledOrderIds']);
+                    Log::info("[CANCEL ALL] KuCoin cancelled {$cancelledCount} orders for {$kucoinSymbol}");
+                    return true;
+                }
+            }
+            
+            Log::error("[CANCEL ALL] KuCoin cancel all failed for {$kucoinSymbol}: " . $response->body());
+            return false;
+            
+        } catch (\Exception $e) {
+            Log::error("[CANCEL ALL] Error cancelling all KuCoin orders for {$symbol}: " . $e->getMessage());
             return false;
         }
     }
