@@ -370,25 +370,14 @@ class FuturesTradingBotController extends Controller
                 return back()->with('error', 'Failed to get current price for ' . $futuresBot->symbol);
             }
 
-            // Create a manual signal
-            $manualSignal = [
-                'direction' => $request->direction === 'long' ? 'bullish' : 'bearish',
-                'type' => 'Manual_Trade',
-                'strength' => 100, // Maximum strength for manual trades
-                'timeframe' => '1h', // Default timeframe
-                'price' => $currentPrice,
-                'confidence' => 1.0, // Maximum confidence
-                'manual' => true // Flag to indicate this is manual
-            ];
-
             // Close any existing position first
             $openTrade = $futuresBot->openTrades()->first();
             if ($openTrade) {
                 $service->closePosition($openTrade, $currentPrice);
             }
 
-            // Process the manual signal - this will calculate SL/TP and place the trade
-            $service->processSignal($manualSignal);
+            // Place manual trade - this will calculate SL/TP and place the trade
+            $service->placeManualTrade($request->direction, $currentPrice);
 
             return back()->with('success', 'Manual ' . ucfirst($request->direction) . ' trade placed successfully! SL/TP calculated automatically.');
             

@@ -466,6 +466,28 @@ class FuturesTradingBotService
     }
 
     /**
+     * Place manual trade with automatic SL/TP calculation
+     */
+    public function placeManualTrade(string $direction, float $currentPrice): void
+    {
+        // Create a manual signal
+        $manualSignal = [
+            'direction' => $direction === 'long' ? 'bullish' : 'bearish',
+            'type' => 'Manual_Trade',
+            'strength' => 100, // Maximum strength for manual trades
+            'timeframe' => '1h', // Default timeframe
+            'price' => $currentPrice,
+            'confidence' => 1.0, // Maximum confidence
+            'manual' => true // Flag to indicate this is manual
+        ];
+
+        $this->logger->info("📋 [MANUAL TRADE] Placing manual {$direction} trade at price {$currentPrice}");
+        
+        // Process the manual signal
+        $this->processSignal($manualSignal, $currentPrice);
+    }
+
+    /**
      * Process individual signal for futures
      */
     private function processSignal(array $signal, float $currentPrice): void
