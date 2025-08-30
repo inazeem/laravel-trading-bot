@@ -30,15 +30,15 @@ return [
 
     // Signal generation settings for HIGH-PRECISION trading (IMPROVED)
     'signal_settings' => [
-        'min_strength_threshold' => 0.90,  // 90% - Drastically increased for quality
-        'high_strength_requirement' => 0.95,  // 95% - Only the strongest signals
+        'min_strength_threshold' => 0.75,  // 90% - Drastically increased for quality
+        'high_strength_requirement' => 0.85,  // 85% - Only the strongest signals
         'min_confluence' => 2,  // Require multiple timeframe confirmation
         'max_trade_duration_hours' => 2,  // Shorter duration for micro trading
         'enable_engulfing_pattern' => true,  // Enable engulfing candle detection
         'engulfing_min_body_ratio' => 0.7,  // Minimum body ratio for engulfing pattern
     ],
 
-    
+
     // Risk management with DYNAMIC PRICE-BASED SL/TP ADJUSTMENT
     'risk_management' => [
         'default_stop_loss_percentage' => 5.0,  // Fallback if no price tier matches
