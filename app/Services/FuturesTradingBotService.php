@@ -698,8 +698,8 @@ class FuturesTradingBotService
             $this->logger->info("📊 [VOLATILITY] Applied volatility multiplier: {$volatilityMultiplier}, Adjusted position: {$positionSize}");
         }
         
-        // Apply strict position limits from config
-        $maxPositionSize = config('micro_trading.risk_management.max_position_size', $this->bot->max_position_size);
+        // Use ONLY the bot's configured max position size - no overrides
+        $maxPositionSize = $this->bot->max_position_size;
         $minNotionalValue = ($this->bot->min_order_value ?? 5) + 0.5;
         $requiredMinPosition = $minNotionalValue / $currentPrice;
         
@@ -908,7 +908,7 @@ class FuturesTradingBotService
         }
         
         // Enhanced fallback to percentage-based stop loss with loosened settings
-        $baseStopLossPercentage = config('micro_trading.risk_management.default_stop_loss_percentage', $this->bot->stop_loss_percentage) / 100;
+        $baseStopLossPercentage = $this->bot->stop_loss_percentage / 100;
         $stopLossBuffer = config('micro_trading.risk_management.stop_loss_buffer', 0.5) / 100;
         
         // Apply buffer for market noise (addresses tight stop loss issue)
