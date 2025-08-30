@@ -571,7 +571,18 @@ class FuturesTradingBotService
         
         // Place the futures order with stop loss and take profit
         $this->logger->info("📤 [ORDER] Attempting to place futures order...");
-        $order = $this->placeFuturesOrder($signal, $positionSize, $stopLoss, $takeProfitLevels);
+        
+        // Handle multi-level vs single take profit
+        if (is_array($takeProfitLevels) && !empty($takeProfitLevels)) {
+            // For multi-level TP, use the first level for the main order
+            $primaryTakeProfit = $takeProfitLevels[0]['price'];
+            $this->logger->info("📤 [ORDER] Using multi-level TP, primary TP: {$primaryTakeProfit}");
+        } else {
+            $primaryTakeProfit = null;
+            $this->logger->info("📤 [ORDER] No take profit levels calculated");
+        }
+        
+        $order = $this->placeFuturesOrder($signal, $positionSize, $stopLoss, $primaryTakeProfit);
         
         if ($order) {
             $this->logger->info("✅ [ORDER] Futures order placed successfully: " . json_encode($order));
@@ -1239,10 +1250,19 @@ class FuturesTradingBotService
     /**
      * Save futures trade to database
      */
-    private function saveFuturesTrade(array $signal, array $order, float $currentPrice, float $stopLoss, float $takeProfit): void
+    private function saveFuturesTrade(array $signal, array $order, float $currentPrice, float $stopLoss, $takeProfit): void
     {
         // Map signal direction to trade side
         $tradeSide = $signal['direction'] === 'bullish' ? 'long' : 'short';
+        
+        // Handle multi-level vs single take profit for database storage
+        $primaryTakeProfit = null;
+        if (is_array($takeProfit) && !empty($takeProfit)) {
+            $primaryTakeProfit = $takeProfit[0]['price'];
+            $this->logger->info("💾 [DATABASE] Storing primary TP from multi-level: {$primaryTakeProfit}");
+        } elseif (is_numeric($takeProfit)) {
+            $primaryTakeProfit = $takeProfit;
+        }
         
         $trade = FuturesTrade::create([
             'futures_trading_bot_id' => $this->bot->id,
@@ -1251,7 +1271,7 @@ class FuturesTradingBotService
             'quantity' => $order['quantity'] ?? 0,
             'entry_price' => $currentPrice,
             'stop_loss' => $stopLoss,
-            'take_profit' => $takeProfit,
+            'take_profit' => $primaryTakeProfit,
             'leverage' => $this->bot->leverage,
             'margin_type' => $this->bot->margin_type,
             'status' => 'open',
@@ -1268,10 +1288,19 @@ class FuturesTradingBotService
     /**
      * Save futures signal to database
      */
-    private function saveFuturesSignal(array $signal, float $currentPrice, float $stopLoss, float $takeProfit, float $riskRewardRatio): void
+    private function saveFuturesSignal(array $signal, float $currentPrice, float $stopLoss, $takeProfit, float $riskRewardRatio): void
     {
         // Map signal direction to database enum values
         $direction = $signal['direction'] === 'bullish' ? 'long' : 'short';
+        
+        // Handle multi-level vs single take profit for signal storage
+        $primaryTakeProfit = null;
+        if (is_array($takeProfit) && !empty($takeProfit)) {
+            $primaryTakeProfit = $takeProfit[0]['price'];
+            $this->logger->info("💾 [SIGNAL] Storing primary TP from multi-level: {$primaryTakeProfit}");
+        } elseif (is_numeric($takeProfit)) {
+            $primaryTakeProfit = $takeProfit;
+        }
         
         FuturesSignal::create([
             'futures_trading_bot_id' => $this->bot->id,
@@ -1282,7 +1311,7 @@ class FuturesTradingBotService
             'strength' => $signal['strength'] ?? 0,
             'price' => $currentPrice,
             'stop_loss' => $stopLoss,
-            'take_profit' => $takeProfit,
+            'take_profit' => $primaryTakeProfit,
             'risk_reward_ratio' => $riskRewardRatio,
             'signal_data' => $signal,
             'executed' => true,
