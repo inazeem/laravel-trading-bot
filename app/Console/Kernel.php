@@ -18,6 +18,12 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping()
             ->runInBackground();
 
+        // Sync futures positions every 2 minutes to update P&L
+        $schedule->command('futures:sync-positions --all')
+            ->everyTwoMinutes()
+            ->withoutOverlapping()
+            ->runInBackground();
+
         // Run regular trading bots every minute
         $schedule->command('trading:run --all')
             ->everyMinute()

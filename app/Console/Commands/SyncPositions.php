@@ -105,7 +105,14 @@ class SyncPositions extends Command
                     // Check if position exists on exchange
                     $positionExists = false;
                     foreach ($exchangePositions as $position) {
-                        $dbSymbol = str_replace('USDT', '-USDT', $position['symbol']);
+                        // Convert KuCoin futures symbol (e.g., SOLUSDTM) to database format (e.g., SOL-USDT)
+                        $dbSymbol = $position['symbol'];
+                        if (str_ends_with($dbSymbol, 'USDTM')) {
+                            $dbSymbol = str_replace('USDTM', '', $dbSymbol) . '-USDT';
+                        } elseif (str_contains($dbSymbol, 'USDT')) {
+                            $dbSymbol = str_replace('USDT', '-USDT', $dbSymbol);
+                        }
+                        
                         if ($dbSymbol === $trade->symbol && $position['side'] === $trade->side) {
                             $positionExists = true;
                             

@@ -1160,16 +1160,22 @@ class ExchangeService
     public function getOpenPositions($symbol = null)
     {
         try {
+            Log::info("[EXCHANGE] getOpenPositions called for exchange: {$this->exchange}, symbol: " . ($symbol ?? 'ALL'));
+            
             switch ($this->exchange) {
                 case 'kucoin':
+                    Log::info("[EXCHANGE] Routing to KuCoin futures positions");
                     return $this->getKuCoinFuturesPositions($symbol);
                 case 'binance':
+                    Log::info("[EXCHANGE] Routing to Binance futures positions");
                     return $this->getBinanceFuturesPositions($symbol);
                 default:
+                    Log::error("[EXCHANGE] Unsupported exchange: {$this->exchange}");
                     throw new \Exception("Unsupported exchange: {$this->exchange}");
             }
         } catch (\Exception $e) {
-            Log::error("Error getting open positions: " . $e->getMessage());
+            Log::error("[EXCHANGE] Error getting open positions: " . $e->getMessage());
+            Log::error("[EXCHANGE] Stack trace: " . $e->getTraceAsString());
             return [];
         }
     }
@@ -1180,6 +1186,8 @@ class ExchangeService
     private function getKuCoinFuturesPositions($symbol = null)
     {
         try {
+            Log::info("[KUCOIN] Starting getKuCoinFuturesPositions for symbol: " . ($symbol ?? 'ALL'));
+            
             $timestamp = time() * 1000;
             $endpoint = '/api/v1/positions';
             
@@ -1189,7 +1197,10 @@ class ExchangeService
                 $futuresSymbol = $this->mapToKuCoinFuturesSymbol($symbol);
                 $queryParams = '?symbol=' . urlencode($futuresSymbol);
                 $endpoint .= $queryParams;
+                Log::info("[KUCOIN] Mapped symbol {$symbol} to {$futuresSymbol}");
             }
+            
+            Log::info("[KUCOIN] Making request to: https://api-futures.kucoin.com{$endpoint}");
             
             $signature = $this->createKuCoinSignature('GET', $endpoint, '', $timestamp);
             
@@ -1200,6 +1211,9 @@ class ExchangeService
                 'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
                 'KC-API-KEY-VERSION' => '2',
             ])->get('https://api-futures.kucoin.com' . $endpoint);
+            
+            Log::info("[KUCOIN] Response status: " . $response->status());
+            Log::info("[KUCOIN] Response body: " . $response->body());
             
             if ($response->successful()) {
                 $data = $response->json();
@@ -2033,6 +2047,8 @@ class ExchangeService
     private function getKuCoinOpenPositions($symbol = null)
     {
         try {
+            Log::info("[KUCOIN] Starting getKuCoinOpenPositions for symbol: " . ($symbol ?? 'ALL'));
+            
             $timestamp = time() * 1000;
             $endpoint = '/api/v1/positions';
             
@@ -2042,7 +2058,10 @@ class ExchangeService
                 $futuresSymbol = $this->mapToKuCoinFuturesSymbol($symbol);
                 $queryParams = '?symbol=' . urlencode($futuresSymbol);
                 $endpoint .= $queryParams;
+                Log::info("[KUCOIN] Mapped symbol {$symbol} to {$futuresSymbol}");
             }
+            
+            Log::info("[KUCOIN] Making request to: https://api-futures.kucoin.com{$endpoint}");
             
             $signature = $this->createKuCoinSignature('GET', $endpoint, '', $timestamp);
             
@@ -2053,6 +2072,9 @@ class ExchangeService
                 'KC-API-PASSPHRASE' => $this->createKuCoinPassphraseSignature(),
                 'KC-API-KEY-VERSION' => '2',
             ])->get('https://api-futures.kucoin.com' . $endpoint);
+            
+            Log::info("[KUCOIN] Response status: " . $response->status());
+            Log::info("[KUCOIN] Response body: " . $response->body());
             
             if ($response->successful()) {
                 $data = $response->json();
