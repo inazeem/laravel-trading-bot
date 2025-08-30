@@ -121,7 +121,7 @@ return [
 
     // Trading session settings (IMPROVED)
     'trading_sessions' => [
-        'max_trades_per_hour' => 3,  // Reduced for quality over quantity
+        'max_trades_per_hour' => 20,  // Increased for testing - CHANGE BACK TO 3 WHEN DONE
         'cooldown_minutes' => 15,  // Increased cooldown for better analysis
         'session_hours' => [  // Active trading hours (24-hour format)
             'start' => 0,  // 00:00 UTC
