@@ -999,7 +999,7 @@ class FuturesTradingBotService
                     if ($bufferedDistance >= $minSlPercentage) {
                         // Apply the buffer by adjusting the stop loss further away
                         $smcStopLoss = $currentPrice * (1 - $bufferedDistance);
-                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer: {$originalDistance:.2%} -> {$bufferedDistance:.2%}");
+                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer: " . round($originalDistance*100, 2) . "% -> " . round($bufferedDistance*100, 2) . "%");
                         $this->logger->info("✅ SMC Stop Loss for long: Using buffered support level, stop loss set at {$smcStopLoss} (" . round($bufferedDistance*100, 2) . "%)");
                         return $smcStopLoss;
                     } else {
@@ -1039,7 +1039,7 @@ class FuturesTradingBotService
                     if ($bufferedDistance >= $minSlPercentage) {
                         // Apply the buffer by adjusting the stop loss further away
                         $smcStopLoss = $currentPrice * (1 + $bufferedDistance);
-                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer: {$originalDistance:.2%} -> {$bufferedDistance:.2%}");
+                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer: " . round($originalDistance*100, 2) . "% -> " . round($bufferedDistance*100, 2) . "%");
                         $this->logger->info("✅ SMC Stop Loss for short: Using buffered resistance level, stop loss set at {$smcStopLoss} (" . round($bufferedDistance*100, 2) . "%)");
                         return $smcStopLoss;
                     } else {
@@ -1200,7 +1200,7 @@ class FuturesTradingBotService
                     if ($bufferedDistance >= $minTpPercentage) {
                         // Apply the buffer by adjusting the take profit further away
                         $bufferedTakeProfit = $currentPrice * (1 + $bufferedDistance);
-                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer to TP: {$originalDistance:.2%} -> {$bufferedDistance:.2%}");
+                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer to TP: " . round($originalDistance*100, 2) . "% -> " . round($bufferedDistance*100, 2) . "%");
                         $this->logger->info("✅ SMC Take Profit for long: Using buffered resistance level at {$bufferedTakeProfit} (" . round($bufferedDistance*100, 2) . "%)");
                         $targetPercentage = $bufferedDistance * 100;
                         return [['level' => 'single', 'price' => $bufferedTakeProfit, 'position_percentage' => 100, 'target_percentage' => $targetPercentage]];
@@ -1239,7 +1239,7 @@ class FuturesTradingBotService
                     if ($bufferedDistance >= $minTpPercentage) {
                         // Apply the buffer by adjusting the take profit further away
                         $bufferedTakeProfit = $currentPrice * (1 - $bufferedDistance);
-                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer to TP: {$originalDistance:.2%} -> {$bufferedDistance:.2%}");
+                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer to TP: " . round($originalDistance*100, 2) . "% -> " . round($bufferedDistance*100, 2) . "%");
                         $this->logger->info("✅ SMC Take Profit for short: Using buffered support level at {$bufferedTakeProfit} (" . round($bufferedDistance*100, 2) . "%)");
                         $targetPercentage = $bufferedDistance * 100;
                         return [['level' => 'single', 'price' => $bufferedTakeProfit, 'position_percentage' => 100, 'target_percentage' => $targetPercentage]];
