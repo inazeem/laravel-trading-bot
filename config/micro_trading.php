@@ -63,24 +63,24 @@ return [
                 // Micro-cap altcoins (< $0.01)
                 'micro' => [
                     'price_range' => ['min' => 0, 'max' => 0.01],
-                    'stop_loss_percentage' => 8.0,  // Wider SL for high volatility
-                    'take_profit_percentage' => 20.0,  // Higher TP for bigger moves
+                    'stop_loss_percentage' => 4.0,  // Reduced from 8.0% to 4.0%
+                    'take_profit_percentage' => 10.0,  // Reduced from 20.0% to 10.0%
                     'min_risk_reward_ratio' => 1.8,
                     'description' => 'Micro-cap altcoins (under $0.01)'
                 ],
                 // Small altcoins ($0.01 - $1)
                 'small' => [
                     'price_range' => ['min' => 0.01, 'max' => 1.0],
-                    'stop_loss_percentage' => 6.0,  // Medium SL
-                    'take_profit_percentage' => 15.0,  // Medium TP
+                    'stop_loss_percentage' => 3.0,  // Reduced from 6.0% to 3.0%
+                    'take_profit_percentage' => 8.0,  // Reduced from 15.0% to 8.0%
                     'min_risk_reward_ratio' => 1.6,
                     'description' => 'Small altcoins ($0.01 - $1.00)'
                 ],
                 // Medium altcoins ($1 - $100)
                 'medium' => [
                     'price_range' => ['min' => 1.0, 'max' => 100.0],
-                    'stop_loss_percentage' => 5.0,  // Moderate SL for medium volatility
-                    'take_profit_percentage' => 12.0,  // Moderate TP
+                    'stop_loss_percentage' => 2.0,  // Reduced from 5.0% to 2.0% for more trading opportunities
+                    'take_profit_percentage' => 6.0,  // Reduced from 12.0% to 6.0% for more realistic targets
                     'min_risk_reward_ratio' => 1.5,
                     'description' => 'Medium altcoins ($1 - $100)'
                 ],
