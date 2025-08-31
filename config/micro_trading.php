@@ -63,24 +63,24 @@ return [
                 // Micro-cap altcoins (< $0.01)
                 'micro' => [
                     'price_range' => ['min' => 0, 'max' => 0.01],
-                    'stop_loss_percentage' => 4.0,  // Reduced from 8.0% to 4.0%
-                    'take_profit_percentage' => 10.0,  // Reduced from 20.0% to 10.0%
+                    'stop_loss_percentage' => 8.0,  // Reverted back to 8.0% - wider SL for high volatility
+                    'take_profit_percentage' => 20.0,  // Reverted back to 20.0% - higher TP for bigger moves
                     'min_risk_reward_ratio' => 1.8,
                     'description' => 'Micro-cap altcoins (under $0.01)'
                 ],
                 // Small altcoins ($0.01 - $1)
                 'small' => [
                     'price_range' => ['min' => 0.01, 'max' => 1.0],
-                    'stop_loss_percentage' => 3.0,  // Reduced from 6.0% to 3.0%
-                    'take_profit_percentage' => 8.0,  // Reduced from 15.0% to 8.0%
+                    'stop_loss_percentage' => 6.0,  // Reverted back to 6.0% - medium SL
+                    'take_profit_percentage' => 15.0,  // Reverted back to 15.0% - medium TP
                     'min_risk_reward_ratio' => 1.6,
                     'description' => 'Small altcoins ($0.01 - $1.00)'
                 ],
                 // Medium altcoins ($1 - $100)
                 'medium' => [
                     'price_range' => ['min' => 1.0, 'max' => 100.0],
-                    'stop_loss_percentage' => 2.0,  // Reduced from 5.0% to 2.0% for more trading opportunities
-                    'take_profit_percentage' => 6.0,  // Reduced from 12.0% to 6.0% for more realistic targets
+                    'stop_loss_percentage' => 5.0,  // Reverted back to 5.0% - moderate SL for medium volatility
+                    'take_profit_percentage' => 12.0,  // Reverted back to 12.0% - moderate TP
                     'min_risk_reward_ratio' => 1.5,
                     'description' => 'Medium altcoins ($1 - $100)'
                 ],
@@ -129,5 +129,14 @@ return [
             'end' => 24,   // 24:00 UTC (24-hour trading)
         ],
         'min_signal_age_minutes' => 5,  // Minimum age before acting on signal
+    ],
+
+    // Market condition filtering (NEW)
+    'market_conditions' => [
+        'enable_tight_market_detection' => true,  // Enable detection of tight/choppy markets
+        'tight_market_threshold' => 3.0,  // If support/resistance within 3%, consider market tight
+        'volatility_threshold' => 0.02,  // 2% minimum volatility required for trading
+        'range_expansion_required' => true,  // Wait for range expansion before trading
+        'pause_trading_in_tight_markets' => true,  // Pause trading when markets are too tight
     ],
 ];
