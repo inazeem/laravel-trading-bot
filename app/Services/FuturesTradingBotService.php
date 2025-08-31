@@ -990,13 +990,26 @@ class FuturesTradingBotService
                 
                 // Check if SMC level respects our minimum distance requirement
                 $slDistance = ($currentPrice - $smcStopLoss) / $currentPrice;
-                if ($slDistance >= $minSlPercentage) {
+                
+                // If distance is too small, add a 2% buffer to make it acceptable
+                if ($slDistance < $minSlPercentage) {
+                    $originalDistance = $slDistance;
+                    $bufferedDistance = $slDistance + 0.02; // Add 2% buffer
+                    
+                    if ($bufferedDistance >= $minSlPercentage) {
+                        // Apply the buffer by adjusting the stop loss further away
+                        $smcStopLoss = $currentPrice * (1 - $bufferedDistance);
+                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer: {$originalDistance:.2%} -> {$bufferedDistance:.2%}");
+                        $this->logger->info("✅ SMC Stop Loss for long: Using buffered support level, stop loss set at {$smcStopLoss} (" . round($bufferedDistance*100, 2) . "%)");
+                        return $smcStopLoss;
+                    } else {
+                        $this->logger->warning("❌ [SMC REJECTION] Support level too close even with buffer (" . round($bufferedDistance*100, 2) . "%) - minimum required: (" . round($minSlPercentage*100, 2) . "%)");
+                        $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate risk management - skipping this trade opportunity");
+                        throw new \Exception("SMC_STOP_LOSS_TOO_CLOSE");
+                    }
+                } else {
                     $this->logger->info("✅ SMC Stop Loss for long: Using support level at {$nearestSupport}, stop loss set at {$smcStopLoss} (" . round($slDistance*100, 2) . "%)");
                     return $smcStopLoss;
-                } else {
-                    $this->logger->warning("❌ [SMC REJECTION] Support level too close (" . round($slDistance*100, 2) . "%) - minimum required: (" . round($minSlPercentage*100, 2) . "%)");
-                    $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate risk management - skipping this trade opportunity");
-                    throw new \Exception("SMC_STOP_LOSS_TOO_CLOSE");
                 }
             }
         } else {
@@ -1017,13 +1030,26 @@ class FuturesTradingBotService
                 
                 // Check if SMC level respects our minimum distance requirement
                 $slDistance = ($smcStopLoss - $currentPrice) / $currentPrice;
-                if ($slDistance >= $minSlPercentage) {
+                
+                // If distance is too small, add a 2% buffer to make it acceptable
+                if ($slDistance < $minSlPercentage) {
+                    $originalDistance = $slDistance;
+                    $bufferedDistance = $slDistance + 0.02; // Add 2% buffer
+                    
+                    if ($bufferedDistance >= $minSlPercentage) {
+                        // Apply the buffer by adjusting the stop loss further away
+                        $smcStopLoss = $currentPrice * (1 + $bufferedDistance);
+                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer: {$originalDistance:.2%} -> {$bufferedDistance:.2%}");
+                        $this->logger->info("✅ SMC Stop Loss for short: Using buffered resistance level, stop loss set at {$smcStopLoss} (" . round($bufferedDistance*100, 2) . "%)");
+                        return $smcStopLoss;
+                    } else {
+                        $this->logger->warning("❌ [SMC REJECTION] Resistance level too close even with buffer (" . round($bufferedDistance*100, 2) . "%) - minimum required: (" . round($minSlPercentage*100, 2) . "%)");
+                        $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate risk management - skipping this trade opportunity");
+                        throw new \Exception("SMC_STOP_LOSS_TOO_CLOSE");
+                    }
+                } else {
                     $this->logger->info("✅ SMC Stop Loss for short: Using resistance level at {$nearestResistance}, stop loss set at {$smcStopLoss} (" . round($slDistance*100, 2) . "%)");
                     return $smcStopLoss;
-                } else {
-                    $this->logger->warning("❌ [SMC REJECTION] Resistance level too close (" . round($slDistance*100, 2) . "%) - minimum required: (" . round($minSlPercentage*100, 2) . "%)");
-                    $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate risk management - skipping this trade opportunity");
-                    throw new \Exception("SMC_STOP_LOSS_TOO_CLOSE");
                 }
             }
         }
@@ -1165,14 +1191,28 @@ class FuturesTradingBotService
                 
                 // Check if the resistance level provides adequate reward based on price tier
                 $tpDistance = ($nearestResistance - $currentPrice) / $currentPrice;
-                if ($tpDistance >= $minTpPercentage) {
+                
+                // If distance is too small, add a 2% buffer to make it acceptable
+                if ($tpDistance < $minTpPercentage) {
+                    $originalDistance = $tpDistance;
+                    $bufferedDistance = $tpDistance + 0.02; // Add 2% buffer
+                    
+                    if ($bufferedDistance >= $minTpPercentage) {
+                        // Apply the buffer by adjusting the take profit further away
+                        $bufferedTakeProfit = $currentPrice * (1 + $bufferedDistance);
+                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer to TP: {$originalDistance:.2%} -> {$bufferedDistance:.2%}");
+                        $this->logger->info("✅ SMC Take Profit for long: Using buffered resistance level at {$bufferedTakeProfit} (" . round($bufferedDistance*100, 2) . "%)");
+                        $targetPercentage = $bufferedDistance * 100;
+                        return [['level' => 'single', 'price' => $bufferedTakeProfit, 'position_percentage' => 100, 'target_percentage' => $targetPercentage]];
+                    } else {
+                        $this->logger->warning("❌ [SMC REJECTION] Resistance level too close even with buffer (" . round($bufferedDistance*100, 2) . "%) - minimum required: (" . round($minTpPercentage*100, 2) . "%)");
+                        $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate profit potential - skipping this trade opportunity");
+                        throw new \Exception("SMC_TAKE_PROFIT_TOO_CLOSE");
+                    }
+                } else {
                     $this->logger->info("✅ SMC Take Profit for long: Using resistance level at {$nearestResistance} (" . round($tpDistance*100, 2) . "%)");
                     $targetPercentage = $tpDistance * 100;
                     return [['level' => 'single', 'price' => $nearestResistance, 'position_percentage' => 100, 'target_percentage' => $targetPercentage]];
-                } else {
-                    $this->logger->warning("❌ [SMC REJECTION] Resistance level too close (" . round($tpDistance*100, 2) . "%) - minimum required: (" . round($minTpPercentage*100, 2) . "%)");
-                    $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate profit potential - skipping this trade opportunity");
-                    throw new \Exception("SMC_TAKE_PROFIT_TOO_CLOSE");
                 }
             }
         } else {
@@ -1190,14 +1230,28 @@ class FuturesTradingBotService
                 
                 // Check if the support level provides adequate reward based on price tier
                 $tpDistance = ($currentPrice - $nearestSupport) / $currentPrice;
-                if ($tpDistance >= $minTpPercentage) {
+                
+                // If distance is too small, add a 2% buffer to make it acceptable
+                if ($tpDistance < $minTpPercentage) {
+                    $originalDistance = $tpDistance;
+                    $bufferedDistance = $tpDistance + 0.02; // Add 2% buffer
+                    
+                    if ($bufferedDistance >= $minTpPercentage) {
+                        // Apply the buffer by adjusting the take profit further away
+                        $bufferedTakeProfit = $currentPrice * (1 - $bufferedDistance);
+                        $this->logger->info("🔧 [SMC BUFFER] Applied 2% buffer to TP: {$originalDistance:.2%} -> {$bufferedDistance:.2%}");
+                        $this->logger->info("✅ SMC Take Profit for short: Using buffered support level at {$bufferedTakeProfit} (" . round($bufferedDistance*100, 2) . "%)");
+                        $targetPercentage = $bufferedDistance * 100;
+                        return [['level' => 'single', 'price' => $bufferedTakeProfit, 'position_percentage' => 100, 'target_percentage' => $targetPercentage]];
+                    } else {
+                        $this->logger->warning("❌ [SMC REJECTION] Support level too close even with buffer (" . round($bufferedDistance*100, 2) . "%) - minimum required: (" . round($minTpPercentage*100, 2) . "%)");
+                        $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate profit potential - skipping this trade opportunity");
+                        throw new \Exception("SMC_TAKE_PROFIT_TOO_CLOSE");
+                    }
+                } else {
                     $this->logger->info("✅ SMC Take Profit for short: Using support level at {$nearestSupport} (" . round($tpDistance*100, 2) . "%)");
                     $targetPercentage = $tpDistance * 100;
                     return [['level' => 'single', 'price' => $nearestSupport, 'position_percentage' => 100, 'target_percentage' => $targetPercentage]];
-                } else {
-                    $this->logger->warning("❌ [SMC REJECTION] Support level too close (" . round($tpDistance*100, 2) . "%) - minimum required: (" . round($minTpPercentage*100, 2) . "%)");
-                    $this->logger->warning("🚫 [SIGNAL REJECTED] Inadequate profit potential - skipping this trade opportunity");
-                    throw new \Exception("SMC_TAKE_PROFIT_TOO_CLOSE");
                 }
             }
         }
