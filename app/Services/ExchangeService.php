@@ -239,6 +239,31 @@ class ExchangeService
     }
 
     /**
+     * Get order book data for a symbol
+     */
+    public function getOrderBook($symbol, $depth = 5)
+    {
+        try {
+            // Normalize symbol format for Binance (remove hyphens)
+            $normalizedSymbol = str_replace('-', '', $symbol);
+            
+            Log::info("Fetching order book for symbol: {$symbol} (normalized: {$normalizedSymbol})");
+            
+            switch ($this->exchange) {
+                case 'kucoin':
+                    return $this->getKuCoinOrderBook($symbol, $depth);
+                case 'binance':
+                    return $this->getBinanceOrderBook($normalizedSymbol, $depth);
+                default:
+                    throw new \Exception("Unsupported exchange: {$this->exchange}");
+            }
+        } catch (\Exception $e) {
+            Log::error("Error fetching order book for {$symbol}: " . $e->getMessage());
+            return ['bids' => [], 'asks' => []];
+        }
+    }
+
+    /**
      * Get candlestick data for a symbol
      */
     public function getCandles($symbol, $interval = '1h', $limit = 500)
@@ -1979,6 +2004,73 @@ class ExchangeService
 
         Log::error("[CANCEL ALL] Binance cancel all open orders failed: " . $response->body());
         return false;
+    }
+
+    /**
+     * Get KuCoin order book
+     */
+    private function getKuCoinOrderBook($symbol, $depth = 5)
+    {
+        try {
+            $url = "https://api.kucoin.com/api/v1/market/orderbook/level2_" . $depth;
+            $params = ['symbol' => $symbol];
+            
+            Log::info("Fetching KuCoin order book: {$url} with params: " . json_encode($params));
+            
+            $response = Http::get($url, $params);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                
+                if (isset($data['data'])) {
+                    return [
+                        'bids' => $data['data']['bids'] ?? [],
+                        'asks' => $data['data']['asks'] ?? []
+                    ];
+                }
+            }
+            
+            Log::error("Failed to fetch KuCoin order book for {$symbol}. Response: " . $response->body());
+            return ['bids' => [], 'asks' => []];
+            
+        } catch (\Exception $e) {
+            Log::error("Error fetching KuCoin order book: " . $e->getMessage());
+            return ['bids' => [], 'asks' => []];
+        }
+    }
+
+    /**
+     * Get Binance order book
+     */
+    private function getBinanceOrderBook($symbol, $depth = 5)
+    {
+        try {
+            $url = "https://api.binance.com/api/v3/depth";
+            $params = [
+                'symbol' => $symbol,
+                'limit' => $depth
+            ];
+            
+            Log::info("Fetching Binance order book: {$url} with params: " . json_encode($params));
+            
+            $response = Http::get($url, $params);
+            
+            if ($response->successful()) {
+                $data = $response->json();
+                
+                return [
+                    'bids' => $data['bids'] ?? [],
+                    'asks' => $data['asks'] ?? []
+                ];
+            }
+            
+            Log::error("Failed to fetch Binance order book for {$symbol}. Response: " . $response->body());
+            return ['bids' => [], 'asks' => []];
+            
+        } catch (\Exception $e) {
+            Log::error("Error fetching Binance order book: " . $e->getMessage());
+            return ['bids' => [], 'asks' => []];
+        }
     }
     
 }

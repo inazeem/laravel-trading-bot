@@ -38,6 +38,11 @@ return Application::configure(basePath: dirname(__DIR__))
             ->everyMinute()
             ->runInBackground()
             ->appendOutputTo(storage_path('logs/futures-bot-scheduler.log'));
+
+        $schedule->command('scalping:run --all')
+            ->everyMinute()
+            ->withoutOverlapping()
+            ->runInBackground();
         
         // Alternative scheduling options (uncomment the one you prefer):
         

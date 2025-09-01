@@ -6,7 +6,9 @@ use App\Models\ApiKey;
 use App\Models\Asset;
 use App\Models\AssetTransaction;
 use App\Models\TradingBot;
+use App\Models\ScalpingTradingBot;
 use App\Policies\ApiKeyPolicy;
+use App\Policies\ScalpingTradingBotPolicy;
 use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvider;
 use Illuminate\Support\Facades\Gate;
 
@@ -19,6 +21,7 @@ class AuthServiceProvider extends ServiceProvider
      */
     protected $policies = [
         ApiKey::class => ApiKeyPolicy::class,
+        ScalpingTradingBot::class => ScalpingTradingBotPolicy::class,
     ];
 
     /**

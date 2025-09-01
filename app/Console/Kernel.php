@@ -24,6 +24,12 @@ class Kernel extends ConsoleKernel
             ->withoutOverlapping()
             ->runInBackground();
 
+        // Run scalping trading bots every minute
+        $schedule->command('scalping:run --all')
+            ->everyMinute()
+            ->withoutOverlapping()
+            ->runInBackground();
+
         // Log scheduler activity
         $schedule->call(function () {
             \Log::info('Scheduler running - ' . now()->format('Y-m-d H:i:s'));

@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\PermissionController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\TradingBotController;
 use App\Http\Controllers\FuturesTradingBotController;
+use App\Http\Controllers\ScalpingTradingBotController;
 use App\Http\Controllers\ApiKeyController;
 use App\Http\Controllers\AssetController;
 
@@ -67,6 +68,16 @@ Route::middleware(['auth'])->group(function () {
     Route::post('futures-bots/{futuresBot}/close-position', [FuturesTradingBotController::class, 'closePosition'])->name('futures-bots.close-position');
     Route::post('futures-bots/{futuresBot}/manual-trade', [FuturesTradingBotController::class, 'manualTrade'])->name('futures-bots.manual-trade');
     Route::post('futures-bots/{futuresBot}/close-trades', [FuturesTradingBotController::class, 'closeTrades'])->name('futures-bots.close-trades');
+    
+    // Scalping Trading Bot routes
+    Route::resource('scalping-bots', ScalpingTradingBotController::class);
+    Route::post('scalping-bots/{scalpingBot}/run', [ScalpingTradingBotController::class, 'run'])->name('scalping-bots.run');
+    Route::post('scalping-bots/{scalpingBot}/toggle', [ScalpingTradingBotController::class, 'toggle'])->name('scalping-bots.toggle');
+    Route::get('scalping-bots/{scalpingBot}/trades', [ScalpingTradingBotController::class, 'trades'])->name('scalping-bots.trades');
+    Route::get('scalping-bots/{scalpingBot}/signals', [ScalpingTradingBotController::class, 'signals'])->name('scalping-bots.signals');
+    Route::post('scalping-bots/{scalpingBot}/close-all-positions', [ScalpingTradingBotController::class, 'closeAllPositions'])->name('scalping-bots.close-all-positions');
+    Route::post('scalping-bots/{scalpingBot}/reset-learning', [ScalpingTradingBotController::class, 'resetLearning'])->name('scalping-bots.reset-learning');
+    Route::post('scalping-bots/{scalpingBot}/learn', [ScalpingTradingBotController::class, 'learn'])->name('scalping-bots.learn');
     
     // API Key routes
     Route::resource('api-keys', ApiKeyController::class);
