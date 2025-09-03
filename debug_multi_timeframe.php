@@ -9,6 +9,7 @@ $app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 use App\Models\FuturesTradingBot;
 use App\Services\ExchangeService;
 use App\Services\SmartMoneyConceptsService;
+use App\Services\FuturesTradingBotService;
 
 echo "=== MULTI-TIMEFRAME SMC ANALYSIS ===\n\n";
 
@@ -22,6 +23,7 @@ if (!$bot) {
 
 echo "Bot: {$bot->name} ({$bot->symbol})\n";
 echo "Timeframes: " . implode(', ', $bot->timeframes) . "\n\n";
+echo "MTF Enabled: " . (config('micro_trading.mtf_confirmation.enable') ? 'yes' : 'no') . "\n";
 
 // Create exchange service
 $exchangeService = new ExchangeService($bot->apiKey);
@@ -77,9 +79,13 @@ foreach ($bot->timeframes as $timeframe) {
     echo "Price range: {$firstPrice} -> {$lastPrice}\n\n";
 }
 
-echo "=== SUMMARY ===\n";
-echo "Multiple timeframe analysis completed!\n";
-echo "This should provide better signal diversity across different market phases.\n\n";
+// Quick dry-run of the bot to exercise the new confirmations
+echo "=== BOT DRY RUN ===\n";
+$service = new FuturesTradingBotService($bot);
+$service->run();
+
+echo "\n=== SUMMARY ===\n";
+echo "Multiple timeframe analysis and bot dry-run completed.\n";
 
 echo "=== NEXT STEPS ===\n";
 echo "1. The bot should now analyze all 3 timeframes\n";
