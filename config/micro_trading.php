@@ -139,4 +139,14 @@ return [
         'range_expansion_required' => true,  // Wait for range expansion before trading
         'pause_trading_in_tight_markets' => true,  // Pause trading when markets are too tight
     ],
+
+    // Multi-timeframe confirmation and 1h S/R control
+    'mtf_confirmation' => [
+        'enable' => true,                       // Enable MTF S/R workflow
+        'include_30m_trend' => true,            // Require 30m trend agreement with 1h
+        'sl_buffer_pct' => 0.003,               // SL buffer around 1h level (0.3%)
+        'tp_extension_pct' => 0.006,            // If next target not found, extend from level (0.6%)
+        'level_tolerance_pct' => 0.0005,        // Level equality tolerance (0.05%)
+        'consumed_ttl_minutes' => 240,          // Cooldown for consumed levels (4h)
+    ],
 ];

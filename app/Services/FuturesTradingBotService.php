@@ -529,6 +529,42 @@ class FuturesTradingBotService
         
         $this->logger->info("✅ [RESTRICTION] Position side check passed - proceeding");
         
+        // Multi-timeframe breakout confirmation and trend filter using 1h levels with 15m/30m confirmations
+        if (config('micro_trading.mtf_confirmation.enable', true)) {
+            $direction = ($signal['direction'] === 'long' || $signal['direction'] === 'bullish') ? 'bullish' : 'bearish';
+
+            // 1) Trend filter on 1h (and optional 30m)
+            if (!$this->passesHigherTimeframeTrendFilter($direction)) {
+                $this->logger->info("🚫 [TREND FILTER] Higher timeframe trend not aligned - skipping trade");
+                return;
+            }
+
+            // 2) Determine the recently broken 1h level in the trade direction
+            $keyLevel = $this->findNearestBrokenHigherTimeframeLevel($direction, $currentPrice);
+            if ($keyLevel === null) {
+                $this->logger->info("🚫 [LEVEL] No recently broken 1h level found for {$direction} - skipping trade");
+                return;
+            }
+
+            // 3) Prevent repeated re-entries at the same level
+            if ($this->hasLevelBeenConsumed($keyLevel)) {
+                $this->logger->info("⛔ [RE-ENTRY GUARD] Level {$keyLevel} was already traded recently - skipping");
+                return;
+            }
+
+            // 4) Confirm breakout on 15m and 30m closes
+            if (!$this->confirmBreakoutOnLowerTimeframes($keyLevel, $direction)) {
+                $this->logger->info("🚫 [CONFIRMATION] Breakout not confirmed on 15m and 30m - skipping trade");
+                return;
+            }
+
+            // Attach key level to signal for downstream SL/TP tagging and persistence
+            $signal['higher_tf_level'] = $keyLevel;
+            $this->logger->info("✅ [MTF] Using 1h key level {$keyLevel} with 15m/30m confirmations");
+        } else {
+            $this->logger->info("ℹ️ [MTF] Multi-timeframe confirmation disabled by config");
+        }
+
         // Check Bitcoin correlation if enabled and not trading BTC itself
         if ($this->bot->enable_bitcoin_correlation && $this->bot->symbol !== 'BTC-USDT') {
             $this->logger->info("🔗 [BTC CORRELATION] Checking Bitcoin correlation for {$signal['direction']} signal...");
@@ -593,10 +629,9 @@ class FuturesTradingBotService
         $this->logger->info("📊 [RISK/REWARD] Calculated ratio (TP1): {$riskRewardRatio}");
         
         // Use price-based minimum risk/reward ratio configuration
-        $priceAdjustment = $this->getPriceBasedAdjustment($currentPrice);
-        $minRiskReward = $priceAdjustment['min_risk_reward_ratio'];
+        $minRiskReward = $this->getMinimumRiskRewardForContext($signal, $currentPrice);
         
-        $this->logger->info("🎯 [PRICE-BASED RR] Using {$priceAdjustment['tier']} tier minimum R/R: {$minRiskReward}");
+        $this->logger->info("🎯 [RR] Minimum required R/R for context: {$minRiskReward}");
         
         if ($riskRewardRatio < $minRiskReward) {
             $this->logger->info("❌ [RISK/REWARD] Risk/reward ratio too low: {$riskRewardRatio} (minimum: {$minRiskReward}) - skipping trade");
@@ -630,6 +665,11 @@ class FuturesTradingBotService
             // Save signal
             $this->logger->info("💾 [DATABASE] Saving signal to database...");
             $this->saveFuturesSignal($signal, $currentPrice, $stopLoss, $takeProfitLevels, $riskRewardRatio);
+            
+            // Mark the consumed level to avoid immediate re-entries at the same price level
+            if (isset($signal['higher_tf_level'])) {
+                $this->markLevelConsumed($signal['higher_tf_level']);
+            }
             
             $this->logger->info("🎉 [SUCCESS] Complete trade process finished successfully");
         } else {
@@ -965,6 +1005,26 @@ class FuturesTradingBotService
      */
     private function calculateStopLoss(array $signal, float $currentPrice): float
     {
+        // Prefer 1h S/R-derived SL when multi-timeframe confirmation is enabled
+        if (config('micro_trading.mtf_confirmation.enable', true)) {
+            $higherLevel = $signal['higher_tf_level'] ?? null;
+            if ($higherLevel !== null) {
+                if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
+                    // SL below the 1h level
+                    $bufferPct = config('micro_trading.mtf_confirmation.sl_buffer_pct', 0.003); // 0.3%
+                    $sl = $higherLevel * (1 - $bufferPct);
+                    $this->logger->info("🛡️ [SL 1H] Using 1h level {$higherLevel} with buffer => SL {$sl}");
+                    return $sl;
+                } else {
+                    // SL above the 1h level
+                    $bufferPct = config('micro_trading.mtf_confirmation.sl_buffer_pct', 0.003);
+                    $sl = $higherLevel * (1 + $bufferPct);
+                    $this->logger->info("🛡️ [SL 1H] Using 1h level {$higherLevel} with buffer => SL {$sl}");
+                    return $sl;
+                }
+            }
+        }
+
         // Get price-based adjustment first
         $priceAdjustment = $this->getPriceBasedAdjustment($currentPrice);
         $minSlPercentage = $priceAdjustment['stop_loss_percentage'] / 100;
@@ -1171,6 +1231,24 @@ class FuturesTradingBotService
      */
     private function calculateSingleTakeProfit(array $signal, float $currentPrice): array
     {
+        // Prefer 1h S/R-derived TP when multi-timeframe confirmation is enabled
+        if (config('micro_trading.mtf_confirmation.enable', true)) {
+            $higherLevel = $signal['higher_tf_level'] ?? null;
+            if ($higherLevel !== null) {
+                $tpBufferPct = config('micro_trading.mtf_confirmation.tp_extension_pct', 0.006); // 0.6%
+                if ($signal['direction'] === 'bullish' || $signal['direction'] === 'long') {
+                    // First TP at or just beyond next 1h resistance above level; fallback extend from level
+                    $tp = $this->findNextHigherTimeframeTarget($higherLevel, 'bullish') ?? ($higherLevel * (1 + $tpBufferPct));
+                    $this->logger->info("🎯 [TP 1H] Using 1h target {$tp} based on level {$higherLevel}");
+                    return [['level' => 'single', 'price' => $tp, 'position_percentage' => 100, 'target_percentage' => (($tp / $currentPrice) - 1) * 100]];
+                } else {
+                    $tp = $this->findNextHigherTimeframeTarget($higherLevel, 'bearish') ?? ($higherLevel * (1 - $tpBufferPct));
+                    $this->logger->info("🎯 [TP 1H] Using 1h target {$tp} based on level {$higherLevel}");
+                    return [['level' => 'single', 'price' => $tp, 'position_percentage' => 100, 'target_percentage' => (1 - ($tp / $currentPrice)) * 100]];
+                }
+            }
+        }
+
         // Get price-based adjustment first
         $priceAdjustment = $this->getPriceBasedAdjustment($currentPrice);
         $minTpPercentage = $priceAdjustment['take_profit_percentage'] / 100;
@@ -1286,10 +1364,11 @@ class FuturesTradingBotService
     {
         $levels = [];
         
-        // Get candlestick data for SMC analysis - optimized for micro trading
-        $timeframe = $this->bot->timeframes[0];
+        // Always derive SL/TP S/R from 1h timeframe for stability
+        $timeframe = '1h';
         $candleLimit = $this->getOptimalCandleLimit($timeframe);
-        $candles = $this->exchangeService->getCandles($this->bot->symbol, $timeframe, $candleLimit);
+        $interval = $this->getExchangeInterval($timeframe);
+        $candles = $this->exchangeService->getCandles($this->bot->symbol, $interval, $candleLimit);
         
         if (empty($candles)) {
             $this->logger->warning("No candlestick data available for SMC analysis");
@@ -1305,6 +1384,144 @@ class FuturesTradingBotService
         $this->logger->info("Retrieved " . count($levels) . " SMC levels for analysis using {$candleLimit} candles");
         
         return $levels;
+    }
+
+    /**
+     * Confirm breakout on 15m and 30m closes relative to a key 1h level
+     */
+    private function confirmBreakoutOnLowerTimeframes(float $level, string $direction): bool
+    {
+        $requiredTimeframes = ['15m', '30m'];
+        foreach ($requiredTimeframes as $tf) {
+            $interval = $this->getExchangeInterval($tf);
+            $limit = 3; // last few candles to confirm a close beyond the level
+            $candles = $this->exchangeService->getCandles($this->bot->symbol, $interval, $limit);
+            if (empty($candles)) {
+                $this->logger->info("❌ [CONFIRM] No candles for {$tf}");
+                return false;
+            }
+            $last = $candles[count($candles) - 1];
+            if ($direction === 'bullish') {
+                if (!($last['close'] > $level)) {
+                    $this->logger->info("❌ [CONFIRM] {$tf} close not above level {$level}");
+                    return false;
+                }
+            } else {
+                if (!($last['close'] < $level)) {
+                    $this->logger->info("❌ [CONFIRM] {$tf} close not below level {$level}");
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Higher timeframe trend filter using 1h (and optional 30m) structure slope
+     */
+    private function passesHigherTimeframeTrendFilter(string $direction): bool
+    {
+        $useThirty = config('micro_trading.mtf_confirmation.include_30m_trend', true);
+        $requiredAgreement = $useThirty ? 2 : 1;
+        $agreements = 0;
+
+        foreach (['1h', '30m'] as $tf) {
+            if ($tf === '30m' && !$useThirty) continue;
+            $interval = $this->getExchangeInterval($tf);
+            $limit = 12; // 12 candles to estimate slope
+            $candles = $this->exchangeService->getCandles($this->bot->symbol, $interval, $limit);
+            if (empty($candles)) continue;
+            $first = $candles[0]['close'];
+            $last = $candles[count($candles) - 1]['close'];
+            $isBull = $last > $first;
+            if (($direction === 'bullish' && $isBull) || ($direction === 'bearish' && !$isBull)) {
+                $agreements++;
+            }
+        }
+
+        return $agreements >= $requiredAgreement;
+    }
+
+    /**
+     * Find nearest recently broken 1h S/R level in the trade direction
+     */
+    private function findNearestBrokenHigherTimeframeLevel(string $direction, float $currentPrice): ?float
+    {
+        // Get 1h levels
+        $timeframe = '1h';
+        $interval = $this->getExchangeInterval($timeframe);
+        $candleLimit = $this->getOptimalCandleLimit($timeframe);
+        $candles = $this->exchangeService->getCandles($this->bot->symbol, $interval, $candleLimit);
+        if (empty($candles)) return null;
+        $smc = new SmartMoneyConceptsService($candles);
+        $levels = $smc->getSupportResistanceLevels();
+
+        // Determine which side and select nearest level beyond/around current price
+        if ($direction === 'bullish') {
+            // Look for resistance just above current price as breakout level
+            $res = array_filter($levels, fn($l) => $l['type'] === 'resistance' && $l['price'] >= $currentPrice * 0.98);
+            if (empty($res)) return null;
+            usort($res, fn($a, $b) => $a['price'] <=> $b['price']);
+            return $res[0]['price'];
+        } else {
+            // Look for support just below current price as breakdown level
+            $sup = array_filter($levels, fn($l) => $l['type'] === 'support' && $l['price'] <= $currentPrice * 1.02);
+            if (empty($sup)) return null;
+            usort($sup, fn($a, $b) => $b['price'] <=> $a['price']);
+            return $sup[0]['price'];
+        }
+    }
+
+    /**
+     * Find next target on 1h in the trade direction from a base level
+     */
+    private function findNextHigherTimeframeTarget(float $baseLevel, string $direction): ?float
+    {
+        $timeframe = '1h';
+        $interval = $this->getExchangeInterval($timeframe);
+        $candleLimit = $this->getOptimalCandleLimit($timeframe);
+        $candles = $this->exchangeService->getCandles($this->bot->symbol, $interval, $candleLimit);
+        if (empty($candles)) return null;
+        $smc = new SmartMoneyConceptsService($candles);
+        $levels = $smc->getSupportResistanceLevels();
+
+        if ($direction === 'bullish') {
+            $res = array_filter($levels, fn($l) => $l['type'] === 'resistance' && $l['price'] > $baseLevel);
+            if (empty($res)) return null;
+            usort($res, fn($a, $b) => $a['price'] <=> $b['price']);
+            return $res[0]['price'];
+        } else {
+            $sup = array_filter($levels, fn($l) => $l['type'] === 'support' && $l['price'] < $baseLevel);
+            if (empty($sup)) return null;
+            usort($sup, fn($a, $b) => $b['price'] <=> $a['price']);
+            return $sup[0]['price'];
+        }
+    }
+
+    /**
+     * Persist and check consumed 1h levels to avoid repeated re-entries
+     */
+    private function hasLevelBeenConsumed(float $level): bool
+    {
+        $key = 'consumed_levels_' . $this->bot->id;
+        $levels = cache()->get($key, []);
+        $tolerance = config('micro_trading.mtf_confirmation.level_tolerance_pct', 0.0005); // 0.05%
+        foreach ($levels as $stored) {
+            if (abs($stored - $level) / $level <= $tolerance) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function markLevelConsumed(float $level): void
+    {
+        $key = 'consumed_levels_' . $this->bot->id;
+        $levels = cache()->get($key, []);
+        $levels[] = $level;
+        $ttl = now()->addMinutes(config('micro_trading.mtf_confirmation.consumed_ttl_minutes', 180));
+        cache()->put($key, $levels, $ttl);
+        $this->logger->info("🧷 [LEVEL] Marked level {$level} as consumed for {$this->bot->name}");
     }
 
     /**
@@ -1344,6 +1561,20 @@ class FuturesTradingBotService
         }
         
         return $reward / $risk;
+    }
+
+    /**
+     * Minimum RR helper favoring stricter RR when using 1h S/R
+     */
+    private function getMinimumRiskRewardForContext(array $signal, float $currentPrice): float
+    {
+        if (config('micro_trading.mtf_confirmation.enable', true)) {
+            $baseAdj = $this->getPriceBasedAdjustment($currentPrice);
+            $base = $baseAdj['min_risk_reward_ratio'] ?? 1.5;
+            return max($base, 1.6);
+        }
+        $baseAdj = $this->getPriceBasedAdjustment($currentPrice);
+        return $baseAdj['min_risk_reward_ratio'] ?? 1.5;
     }
 
     /**
