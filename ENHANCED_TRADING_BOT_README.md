@@ -11,7 +11,7 @@ The Enhanced Spot Trading Bot is an improved version of the original trading bot
 - **Strength Normalization**: Handles different strength formats (0-1, 0-100, etc.)
 - **Smart Signal Ranking**: Processes only the strongest signal in each direction
 
-### 💰 Intelligent Position Sizing
+### 💰 Intelligent Position SizingAnalysis Timeframes 
 - **10% Rule**: Trades exactly 10% of current asset holdings
 - **Asset Holdings Tracking**: Automatically tracks and updates user asset holdings
 - **USDT Balance Integration**: Uses 10% of USDT balance for buy orders when no holdings exist
