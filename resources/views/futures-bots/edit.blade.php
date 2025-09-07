@@ -185,6 +185,94 @@
                                 @enderror
                             </div>
 
+                            <!-- Strategy Selection -->
+                            <div class="mt-8">
+                                <h3 class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2 mb-4">Trading Strategy</h3>
+                                
+                                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                                    <div class="flex items-start">
+                                        <div class="flex-shrink-0">
+                                            <svg class="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                                                <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+                                            </svg>
+                                        </div>
+                                        <div class="ml-3">
+                                            <h4 class="text-sm font-medium text-blue-800">Strategy-Based Trading</h4>
+                                            <p class="text-sm text-blue-700 mt-1">
+                                                Select a trading strategy to automate your bot's decision-making. The bot will follow the strategy's rules for entry and exit signals.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label for="strategy_id" class="block text-sm font-medium text-gray-700 mb-1">Select Strategy</label>
+                                        <select name="strategy_id" id="strategy_id"
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                            <option value="">No Strategy (Manual Trading)</option>
+                                            @foreach($availableStrategies as $strategy)
+                                                <option value="{{ $strategy->id }}" 
+                                                    {{ old('strategy_id', $currentStrategies->first()?->id) == $strategy->id ? 'selected' : '' }}>
+                                                    {{ $strategy->name }} 
+                                                    @if($strategy->is_system) (System) @else (Custom) @endif
+                                                </option>
+                                            @endforeach
+                                        </select>
+                                        @error('strategy_id')
+                                            <p class="text-red-600 text-sm mt-1">{{ $message }}</p>
+                                        @enderror
+                                    </div>
+                                    <div>
+                                        <label for="strategy_priority" class="block text-sm font-medium text-gray-700 mb-1">Strategy Priority</label>
+                                        <select name="strategy_priority" id="strategy_priority"
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                            @for($i = 1; $i <= 5; $i++)
+                                                <option value="{{ $i }}" 
+                                                    {{ old('strategy_priority', $currentStrategies->first()?->pivot?->priority ?? 1) == $i ? 'selected' : '' }}>
+                                                    Priority {{ $i }}
+                                                </option>
+                                            @endfor
+                                        </select>
+                                        <p class="text-xs text-gray-500 mt-1">Higher priority strategies are executed first when multiple strategies are attached.</p>
+                                    </div>
+                                </div>
+
+                                <!-- Current Strategy Display -->
+                                @if($currentStrategies->count() > 0)
+                                    <div class="mt-4">
+                                        <h4 class="text-sm font-medium text-gray-700 mb-2">Current Strategy:</h4>
+                                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                                            @foreach($currentStrategies as $strategy)
+                                                <div class="flex items-center justify-between">
+                                                    <div>
+                                                        <span class="font-medium text-gray-900">{{ $strategy->name }}</span>
+                                                        <span class="text-sm text-gray-500 ml-2">(Priority: {{ $strategy->pivot->priority }})</span>
+                                                    </div>
+                                                    <div class="text-sm text-gray-600">
+                                                        {{ $strategy->description }}
+                                                    </div>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                @endif
+
+                                <div class="mt-4">
+                                    <div class="flex items-center justify-between">
+                                        <div class="text-sm text-gray-600">
+                                            <a href="{{ route('strategies.index') }}" class="text-blue-600 hover:text-blue-800">
+                                                View all strategies
+                                            </a>
+                                            or
+                                            <a href="{{ route('strategies.create') }}" class="text-blue-600 hover:text-blue-800">
+                                                create a new strategy
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- Submit Buttons -->
                             <div class="mt-8 flex justify-end space-x-4">
                                 <a href="{{ route('futures-bots.show', $futuresBot) }}" 

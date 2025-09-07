@@ -10,6 +10,7 @@ use App\Http\Controllers\TradingBotController;
 use App\Http\Controllers\FuturesTradingBotController;
 use App\Http\Controllers\ApiKeyController;
 use App\Http\Controllers\AssetController;
+use App\Http\Controllers\StrategyController;
 
 Route::get('/', [App\Http\Controllers\HomeController::class, 'index'])->name('home');
 
@@ -65,6 +66,14 @@ Route::middleware(['auth'])->group(function () {
     Route::get('futures-bots/{futuresBot}/logs', [FuturesTradingBotController::class, 'logs'])->name('futures-bots.logs');
     Route::post('futures-bots/{futuresBot}/clear-logs', [FuturesTradingBotController::class, 'clearLogs'])->name('futures-bots.clear-logs');
     Route::post('futures-bots/{futuresBot}/close-position', [FuturesTradingBotController::class, 'closePosition'])->name('futures-bots.close-position');
+    
+    // Strategy routes
+    Route::resource('strategies', StrategyController::class);
+    Route::get('strategies/select-for-bot', [StrategyController::class, 'selectForBot'])->name('strategies.select-for-bot');
+    Route::post('strategies/attach-to-bot', [StrategyController::class, 'attachToBot'])->name('strategies.attach-to-bot');
+    Route::post('strategies/detach-from-bot', [StrategyController::class, 'detachFromBot'])->name('strategies.detach-from-bot');
+    Route::post('strategies/update-bot-parameters', [StrategyController::class, 'updateBotStrategyParameters'])->name('strategies.update-bot-parameters');
+    Route::get('strategies/recommendations', [StrategyController::class, 'getRecommendations'])->name('strategies.recommendations');
     Route::post('futures-bots/{futuresBot}/manual-trade', [FuturesTradingBotController::class, 'manualTrade'])->name('futures-bots.manual-trade');
     Route::post('futures-bots/{futuresBot}/close-trades', [FuturesTradingBotController::class, 'closeTrades'])->name('futures-bots.close-trades');
     

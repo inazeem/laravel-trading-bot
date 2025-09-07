@@ -118,6 +118,75 @@
                     </div>
                 </div>
 
+                <!-- Strategy Selection -->
+                <div class="mt-8">
+                    <h3 class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2 mb-4">Trading Strategy</h3>
+                    
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                        <div class="flex items-start">
+                            <svg class="w-5 h-5 text-blue-400 mt-0.5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div>
+                                <h4 class="text-sm font-medium text-blue-800">Strategy Selection</h4>
+                                <p class="text-sm text-blue-700 mt-1">
+                                    You can attach a trading strategy to this bot now, or do it later from the bot's detail page. 
+                                    Strategies provide intelligent trading signals and risk management.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="strategy_id" class="block text-sm font-medium text-gray-700 mb-1">Select Strategy (Optional)</label>
+                            <select name="strategy_id" id="strategy_id"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">No Strategy (Manual Trading)</option>
+                                @php
+                                    $availableStrategies = \App\Services\StrategyFactory::getAvailableStrategies('futures');
+                                @endphp
+                                @foreach($availableStrategies as $strategy)
+                                    <option value="{{ $strategy->id }}" {{ old('strategy_id') == $strategy->id ? 'selected' : '' }}>
+                                        {{ $strategy->name }} 
+                                        @if($strategy->is_system) (System) @else (Custom) @endif
+                                    </option>
+                                @endforeach
+                            </select>
+                            @error('strategy_id')
+                                <p class="text-red-600 text-sm mt-1">{{ $message }}</p>
+                            @enderror
+                        </div>
+
+                        <div>
+                            <label for="strategy_priority" class="block text-sm font-medium text-gray-700 mb-1">Strategy Priority</label>
+                            <select name="strategy_priority" id="strategy_priority"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                @for($i = 1; $i <= 5; $i++)
+                                    <option value="{{ $i }}" {{ old('strategy_priority', 1) == $i ? 'selected' : '' }}>
+                                        Priority {{ $i }}
+                                    </option>
+                                @endfor
+                            </select>
+                            <p class="text-xs text-gray-500 mt-1">Higher priority strategies are executed first when multiple strategies are attached.</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-4">
+                        <div class="flex items-center justify-between">
+                            <div class="text-sm text-gray-600">
+                                <a href="{{ route('strategies.index') }}" class="text-blue-600 hover:text-blue-800">
+                                    View all strategies
+                                </a>
+                                or
+                                <a href="{{ route('strategies.create') }}" class="text-blue-600 hover:text-blue-800">
+                                    create a new strategy
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Risk Management -->
                 <div class="mt-8 space-y-4">
                     <h3 class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">Risk Management</h3>

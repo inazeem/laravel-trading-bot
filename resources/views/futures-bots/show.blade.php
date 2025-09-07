@@ -100,7 +100,7 @@
                     </div>
 
                     <!-- Configuration Grid -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-6">
                         <div class="bg-gray-50 p-4 rounded-lg">
                             <h3 class="text-sm font-medium text-gray-500">Leverage</h3>
                             <p class="text-2xl font-bold text-gray-900">{{ $futuresBot->leverage }}x</p>
@@ -116,6 +116,20 @@
                         <div class="bg-gray-50 p-4 rounded-lg">
                             <h3 class="text-sm font-medium text-gray-500">Position Side</h3>
                             <p class="text-2xl font-bold text-gray-900 capitalize">{{ $futuresBot->position_side }}</p>
+                        </div>
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h3 class="text-sm font-medium text-gray-500">Trading Strategy</h3>
+                            @if($futuresBot->strategies->count() > 0)
+                                @foreach($futuresBot->strategies as $strategy)
+                                    <div class="mb-1">
+                                        <p class="text-sm font-bold text-gray-900">{{ $strategy->name }}</p>
+                                        <p class="text-xs text-gray-600">Priority: {{ $strategy->pivot->priority }}</p>
+                                    </div>
+                                @endforeach
+                            @else
+                                <p class="text-sm text-gray-600">No Strategy</p>
+                                <p class="text-xs text-gray-500">Manual Trading</p>
+                            @endif
                         </div>
                     </div>
 

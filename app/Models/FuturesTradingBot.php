@@ -84,6 +84,32 @@ class FuturesTradingBot extends Model
         return $this->belongsTo(ApiKey::class);
     }
 
+    /**
+     * Get strategies attached to this futures bot
+     */
+    public function strategies()
+    {
+        return $this->morphToMany(TradingStrategy::class, 'bot', 'bot_strategies', 'bot_id', 'strategy_id')
+            ->withPivot(['parameters', 'is_active', 'priority'])
+            ->withTimestamps();
+    }
+
+    /**
+     * Get bot strategies (pivot table)
+     */
+    public function botStrategies()
+    {
+        return $this->morphMany(BotStrategy::class, 'bot');
+    }
+
+    /**
+     * Get active strategies for this futures bot
+     */
+    public function activeStrategies()
+    {
+        return $this->strategies()->wherePivot('is_active', true)->orderByPivot('priority');
+    }
+
     public function logs()
     {
         return $this->hasMany(TradingBotLog::class, 'futures_trading_bot_id');

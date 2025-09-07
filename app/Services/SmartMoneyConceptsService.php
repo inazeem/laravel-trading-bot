@@ -714,6 +714,129 @@ class SmartMoneyConceptsService
     }
 
     /**
+     * Calculate discount, equilibrium, and premium price zones
+     * Based on SMC methodology using multiple swing points and market structure
+     */
+    public function getPriceZones(): array
+    {
+        if (empty($this->swingHighs) || empty($this->swingLows)) {
+            return [
+                'discount' => null,
+                'equilibrium' => null,
+                'premium' => null,
+                'range_top' => null,
+                'range_bottom' => null,
+                'swing_high' => null,
+                'swing_low' => null
+            ];
+        }
+
+        // Get significant swing points from the last 50-100 candles (broader analysis)
+        $recentSwingHighs = array_slice($this->swingHighs, -10); // Last 10 swing highs
+        $recentSwingLows = array_slice($this->swingLows, -10);   // Last 10 swing lows
+        
+        // Find the most significant swing points (highest high, lowest low)
+        $swingHigh = max(array_column($recentSwingHighs, 'price'));
+        $swingLow = min(array_column($recentSwingLows, 'price'));
+        
+        // Calculate the range
+        $rangeSize = $swingHigh - $swingLow;
+        $rangePercentage = $swingLow > 0 ? ($rangeSize / $swingLow) * 100 : 0;
+        
+        // SMC methodology: Use broader market structure analysis
+        // Get additional context from recent price action
+        $recentCandles = array_slice($this->candles, -50); // Last 50 candles
+        $recentHigh = max(array_column($recentCandles, 'high'));
+        $recentLow = min(array_column($recentCandles, 'low'));
+        
+        // Calculate zones based on broader market structure
+        // Discount zone: Bottom 20% of the range (where institutions typically buy)
+        $discount = $swingLow + ($rangeSize * 0.2);
+        
+        // Premium zone: Top 20% of the range (where institutions typically sell)
+        $premium = $swingLow + ($rangeSize * 0.8);
+        
+        // Equilibrium zone: Middle 60% of the range (fair value area)
+        $equilibrium = ($swingHigh + $swingLow) / 2;
+        
+        return [
+            'discount' => $discount,
+            'equilibrium' => $equilibrium,
+            'premium' => $premium,
+            'range_top' => $swingHigh,
+            'range_bottom' => $swingLow,
+            'range_size' => $rangeSize,
+            'range_percentage' => $rangePercentage,
+            'swing_high' => $swingHigh,
+            'swing_low' => $swingLow,
+            'recent_high' => $recentHigh,
+            'recent_low' => $recentLow
+        ];
+    }
+
+    /**
+     * Determine which price zone the current price is in
+     */
+    public function getCurrentPriceZone(float $currentPrice): array
+    {
+        $zones = $this->getPriceZones();
+        
+        if (!$zones['discount'] || !$zones['premium']) {
+            return [
+                'zone' => 'unknown',
+                'distance_to_zone' => null,
+                'zone_percentage' => null,
+                'min' => null,
+                'max' => null,
+                'distance_from_center' => null
+            ];
+        }
+
+        $discount = $zones['discount'];
+        $equilibrium = $zones['equilibrium'];
+        $premium = $zones['premium'];
+        $swingHigh = $zones['swing_high'];
+        $swingLow = $zones['swing_low'];
+
+        // Determine which zone the price is in based on SMC methodology
+        if ($currentPrice <= $discount) {
+            // Price is at or below discount zone = DISCOUNT ZONE (institutions buying)
+            $zone = 'discount';
+            $min = $swingLow;
+            $max = $discount;
+            $distance = $discount - $currentPrice;
+            $zonePercentage = (($discount - $currentPrice) / $discount) * 100;
+            $distanceFromCenter = (($currentPrice - ($min + $max) / 2) / (($min + $max) / 2)) * 100;
+        } elseif ($currentPrice <= $premium) {
+            // Price is between discount and premium = EQUILIBRIUM ZONE (fair value)
+            $zone = 'equilibrium';
+            $min = $discount;
+            $max = $premium;
+            $distance = abs($currentPrice - $equilibrium);
+            $zonePercentage = (($currentPrice - $discount) / ($premium - $discount)) * 100;
+            $distanceFromCenter = (($currentPrice - $equilibrium) / $equilibrium) * 100;
+        } else {
+            // Price is above premium zone = PREMIUM ZONE (institutions selling)
+            $zone = 'premium';
+            $min = $premium;
+            $max = $swingHigh;
+            $distance = $currentPrice - $premium;
+            $zonePercentage = (($currentPrice - $premium) / $premium) * 100;
+            $distanceFromCenter = (($currentPrice - ($min + $max) / 2) / (($min + $max) / 2)) * 100;
+        }
+
+        return [
+            'zone' => $zone,
+            'distance_to_zone' => $distance,
+            'zone_percentage' => $zonePercentage,
+            'min' => $min,
+            'max' => $max,
+            'distance_from_center' => $distanceFromCenter,
+            'zones' => $zones
+        ];
+    }
+
+    /**
      * Generate trading signals
      */
     public function generateSignals(float $currentPrice): array

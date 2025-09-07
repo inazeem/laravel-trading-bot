@@ -56,4 +56,30 @@ class TradingBot extends Model
     {
         return $this->hasMany(TradingBotLog::class);
     }
+
+    /**
+     * Get strategies attached to this bot
+     */
+    public function strategies()
+    {
+        return $this->morphToMany(TradingStrategy::class, 'bot', 'bot_strategies', 'bot_id', 'strategy_id')
+            ->withPivot(['parameters', 'is_active', 'priority'])
+            ->withTimestamps();
+    }
+
+    /**
+     * Get bot strategies (pivot table)
+     */
+    public function botStrategies()
+    {
+        return $this->morphMany(BotStrategy::class, 'bot');
+    }
+
+    /**
+     * Get active strategies for this bot
+     */
+    public function activeStrategies()
+    {
+        return $this->strategies()->wherePivot('is_active', true)->orderByPivot('priority');
+    }
 }

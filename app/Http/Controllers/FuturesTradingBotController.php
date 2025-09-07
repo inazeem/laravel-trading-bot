@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\FuturesTradingBot;
 use App\Models\ApiKey;
-use App\Services\FuturesTradingBotService;
+use App\Services\SimpleFuturesTradingBotService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -85,6 +85,16 @@ class FuturesTradingBotController extends Controller
                 'status' => 'idle',
             ]);
 
+            // Attach strategy if selected
+            if ($request->strategy_id) {
+                \App\Services\StrategyFactory::attachStrategyToBot(
+                    $bot, 
+                    $request->strategy_id, 
+                    [], 
+                    $request->strategy_priority ?? 1
+                );
+            }
+
             return redirect()->route('futures-bots.index')
                 ->with('success', "Futures trading bot '{$bot->name}' created successfully");
 
@@ -100,7 +110,7 @@ class FuturesTradingBotController extends Controller
             abort(403);
         }
 
-        $futuresBot->load(['apiKey', 'trades', 'signals']);
+        $futuresBot->load(['apiKey', 'trades', 'signals', 'strategies']);
 
         $recentTrades = $futuresBot->trades()
             ->orderBy('created_at', 'desc')
@@ -145,7 +155,13 @@ class FuturesTradingBotController extends Controller
         $marginTypes = ['isolated', 'cross'];
         $positionSides = ['long', 'short', 'both'];
 
-        return view('futures-bots.edit', compact('futuresBot', 'apiKeys', 'timeframes', 'leverages', 'marginTypes', 'positionSides'));
+        // Get available strategies for futures trading
+        $availableStrategies = \App\Services\StrategyFactory::getAvailableStrategies('futures');
+        
+        // Get current bot strategies
+        $currentStrategies = $futuresBot->activeStrategies()->get();
+
+        return view('futures-bots.edit', compact('futuresBot', 'apiKeys', 'timeframes', 'leverages', 'marginTypes', 'positionSides', 'availableStrategies', 'currentStrategies'));
     }
 
     public function update(Request $request, FuturesTradingBot $futuresBot)
@@ -168,6 +184,8 @@ class FuturesTradingBotController extends Controller
             'position_side' => 'required|in:long,short,both',
             'stop_loss_percentage' => 'required|numeric|min:0.1|max:10',
             'take_profit_percentage' => 'required|numeric|min:0.1|max:20',
+            'strategy_id' => 'nullable|exists:trading_strategies,id',
+            'strategy_priority' => 'nullable|integer|min:1|max:5',
         ]);
 
         try {
@@ -185,6 +203,23 @@ class FuturesTradingBotController extends Controller
                 'take_profit_percentage' => $request->take_profit_percentage,
                 'strategy_settings' => $request->strategy_settings ?? $futuresBot->strategy_settings,
             ]);
+
+            // Handle strategy changes
+            if ($request->strategy_id) {
+                // Remove existing strategies
+                $futuresBot->strategies()->detach();
+                
+                // Attach new strategy
+                \App\Services\StrategyFactory::attachStrategyToBot(
+                    $futuresBot, 
+                    $request->strategy_id, 
+                    [], 
+                    $request->strategy_priority ?? 1
+                );
+            } else {
+                // Remove all strategies if none selected
+                $futuresBot->strategies()->detach();
+            }
 
             return redirect()->route('futures-bots.show', $futuresBot)
                 ->with('success', "Futures trading bot '{$futuresBot->name}' updated successfully");
@@ -246,7 +281,7 @@ class FuturesTradingBotController extends Controller
         }
 
         try {
-            $service = new FuturesTradingBotService($futuresBot);
+            $service = new SimpleFuturesTradingBotService($futuresBot);
             $service->run();
 
             return back()->with('success', "Futures trading bot '{$futuresBot->name}' executed successfully");
@@ -326,7 +361,7 @@ class FuturesTradingBotController extends Controller
         }
 
         try {
-            $service = new FuturesTradingBotService($futuresBot);
+            $service = new SimpleFuturesTradingBotService($futuresBot);
             
             // Get current price
             $exchangeService = new \App\Services\ExchangeService($futuresBot->apiKey);
@@ -361,7 +396,7 @@ class FuturesTradingBotController extends Controller
 
         try {
             $futuresBot->load('apiKey');
-            $service = new \App\Services\FuturesTradingBotService($futuresBot);
+            $service = new \App\Services\SimpleFuturesTradingBotService($futuresBot);
             $exchangeService = new \App\Services\ExchangeService($futuresBot->apiKey);
 
             // Get current price
@@ -398,7 +433,7 @@ class FuturesTradingBotController extends Controller
 
         try {
             $futuresBot->load('apiKey');
-            $service = new \App\Services\FuturesTradingBotService($futuresBot);
+            $service = new \App\Services\SimpleFuturesTradingBotService($futuresBot);
             $exchangeService = new \App\Services\ExchangeService($futuresBot->apiKey);
 
             // Get current price for PnL calculation
