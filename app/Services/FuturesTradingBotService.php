@@ -86,8 +86,8 @@ class FuturesTradingBotService
             // Sync positions with exchange before processing
             $this->syncPositionsWithExchange();
             
-            // Learn from trading history and apply improvements
-            $this->learnFromTradingHistory();
+            // Learning system disabled as requested by user
+            // $this->learnFromTradingHistory();
             
             // Update bot status
             $this->bot->update(['status' => 'running', 'last_run_at' => now()]);
@@ -256,8 +256,8 @@ class FuturesTradingBotService
         foreach ($signals as $index => $signal) {
             $this->logger->info("🔍 [FILTER] Processing signal {$index}: " . json_encode($signal));
             
-            // ULTRA HIGH-PRECISION: Use only the strongest signals based on analysis results
-            $requiredStrength = config('micro_trading.signal_settings.high_strength_requirement', 0.95); // 95% strength requirement
+            // SIMPLIFIED: Use configurable strength requirement for more trading opportunities
+            $requiredStrength = config('micro_trading.signal_settings.high_strength_requirement', 0.70); // 70% strength requirement
             $signalStrength = $signal['strength'] ?? 0;
             
             // Special priority for engulfing patterns - they get slightly lower threshold

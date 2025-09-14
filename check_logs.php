@@ -1,25 +1,27 @@
 <?php
 
-/**
- * Check Laravel Logs
- * 
- * Check the Laravel logs for Binance API responses
- */
+require_once 'vendor/autoload.php';
 
-$logFile = 'storage/logs/laravel.log';
+$app = require_once 'bootstrap/app.php';
+$app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 
-if (file_exists($logFile)) {
-    echo "📋 Recent Laravel Logs (last 50 lines):\n";
-    echo "=====================================\n\n";
-    
-    $lines = file($logFile);
-    $recentLines = array_slice($lines, -50);
-    
-    foreach ($recentLines as $line) {
-        if (strpos($line, 'Binance') !== false || strpos($line, 'API') !== false) {
-            echo trim($line) . "\n";
-        }
-    }
-} else {
-    echo "❌ Log file not found: {$logFile}\n";
+echo "=== RECENT LOGS FOR FUTURES BOT ===\n";
+$logs = \App\Models\TradingBotLog::where('futures_trading_bot_id', 7)
+    ->latest()
+    ->take(20)
+    ->get();
+
+foreach($logs as $log) {
+    echo "{$log->created_at->format('Y-m-d H:i:s')} [{$log->level}] {$log->message}\n";
+}
+
+echo "\n=== OPEN TRADES ===\n";
+$openTrades = \App\Models\FuturesTrade::where('futures_trading_bot_id', 7)
+    ->where('status', 'open')
+    ->get();
+
+echo "Open trades: " . $openTrades->count() . "\n";
+
+foreach($openTrades as $trade) {
+    echo "Trade ID: {$trade->id}, Side: {$trade->side}, Quantity: {$trade->quantity}, Entry: {$trade->entry_price}\n";
 }

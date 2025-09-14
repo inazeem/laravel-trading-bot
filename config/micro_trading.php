@@ -28,11 +28,11 @@ return [
         'swing_detection_length' => 3,  // Swing point detection sensitivity
     ],
 
-    // Signal generation settings for HIGH-PRECISION trading (IMPROVED)
+    // Signal generation settings - SIMPLIFIED FOR IMMEDIATE TRADING
     'signal_settings' => [
-        'min_strength_threshold' => 0.75,  // 90% - Drastically increased for quality
-        'high_strength_requirement' => 0.85,  // 85% - Only the strongest signals
-        'min_confluence' => 2,  // Require multiple timeframe confirmation
+        'min_strength_threshold' => 0.60,  // 60% - Lowered for more trading opportunities
+        'high_strength_requirement' => 0.70,  // 70% - More reasonable requirement
+        'min_confluence' => 0,  // Allow single timeframe signals (simplified for immediate trading)
         'max_trade_duration_hours' => 2,  // Shorter duration for micro trading
         'enable_engulfing_pattern' => true,  // Enable engulfing candle detection
         'engulfing_min_body_ratio' => 0.7,  // Minimum body ratio for engulfing pattern
@@ -41,15 +41,15 @@ return [
 
     // Risk management with DYNAMIC PRICE-BASED SL/TP ADJUSTMENT
     'risk_management' => [
-        'default_stop_loss_percentage' => 5.0,  // Fallback if no price tier matches
+        'default_stop_loss_percentage' => 2.0,  // 2% stop loss for 1:2 risk/reward
         'multi_take_profit' => false,  // Disabled to prevent quick closures - use bot's configured TP instead
         'take_profit_levels' => [
-            'tp1' => ['percentage' => 8.0, 'position_close' => 30],   // More conservative TP1
-            'tp2' => ['percentage' => 15.0, 'position_close' => 35],  // Higher TP2
-            'tp3' => ['percentage' => 25.0, 'position_close' => 35],  // Much higher TP3
+            'tp1' => ['percentage' => 4.0, 'position_close' => 100],   // 4% take profit for 1:2 ratio
+            'tp2' => ['percentage' => 4.0, 'position_close' => 35],  // Same as TP1 for consistency
+            'tp3' => ['percentage' => 4.0, 'position_close' => 35],  // Same as TP1 for consistency
         ],
         'max_position_size' => 0.01,  // Increased since we have better risk management
-        'min_risk_reward_ratio' => 1.5,  // More realistic for different asset types
+        'min_risk_reward_ratio' => 2.0,  // 1:2 risk/reward ratio as requested
         'dynamic_sizing' => true,  // Enable dynamic position sizing based on signal strength
         'volatility_adjustment' => true,  // Adjust SL/TP based on market volatility
         'stop_loss_buffer' => 0.5,  // Additional buffer percentage for market noise
@@ -87,10 +87,10 @@ return [
                 // Large cap ($100 - $10k)
                 'large' => [
                     'price_range' => ['min' => 100.0, 'max' => 10000.0],
-                    'stop_loss_percentage' => 3.0,  // Tight SL
-                    'take_profit_percentage' => 8.0,  // Conservative TP
-                    'min_risk_reward_ratio' => 1.2,
-                    'description' => 'Large cap assets ($100 - $10k)'
+                    'stop_loss_percentage' => 2.0,  // 2% SL for 1:2 ratio
+                    'take_profit_percentage' => 4.0,  // 4% TP for 1:2 ratio
+                    'min_risk_reward_ratio' => 2.0,
+                    'description' => 'Large cap assets ($100 - $10k) - 1:2 R/R'
                 ],
                 // Ultra large cap (> $10k) - BTC, etc.
                 'ultra' => [
@@ -142,7 +142,7 @@ return [
 
     // Multi-timeframe confirmation and 1h S/R control
     'mtf_confirmation' => [
-        'enable' => true,                       // Enable MTF S/R workflow
+        'enable' => false,                      // DISABLED for immediate trading - too restrictive
         'include_30m_trend' => true,            // Require 30m trend agreement with 1h
         'sl_buffer_pct' => 0.003,               // SL buffer around 1h level (0.3%)
         'tp_extension_pct' => 0.006,            // If next target not found, extend from level (0.6%)

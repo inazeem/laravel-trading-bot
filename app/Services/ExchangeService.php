@@ -1037,13 +1037,35 @@ class ExchangeService
             
             // Get appropriate precision for this symbol
             $precision = $this->getFuturesQuantityPrecision($binanceSymbol);
+            $roundedQuantity = round($quantity, $precision);
+            
+            Log::info("🔧 [ORDER DEBUG] Original quantity: {$quantity}, Precision: {$precision}, Rounded: {$roundedQuantity}");
+            
+            // Validate quantity before placing order
+            if ($roundedQuantity <= 0) {
+                Log::error("❌ [ORDER ERROR] Rounded quantity is zero or negative: {$roundedQuantity}");
+                Log::error("❌ [ORDER ERROR] Original quantity: {$quantity}, Precision: {$precision}");
+                
+                // Try with higher precision if quantity is too small
+                if ($quantity > 0) {
+                    $higherPrecision = min(3, $precision + 1);
+                    $roundedQuantity = round($quantity, $higherPrecision);
+                    Log::info("🔧 [ORDER FIX] Trying higher precision {$higherPrecision}, new quantity: {$roundedQuantity}");
+                    
+                    if ($roundedQuantity <= 0) {
+                        throw new \Exception("Quantity too small for any reasonable precision: {$quantity}");
+                    }
+                } else {
+                    throw new \Exception("Invalid quantity after precision rounding: {$roundedQuantity}");
+                }
+            }
             
             // MARKET ORDER ONLY - simplified logic
             $orderParams = [
                 'symbol' => $binanceSymbol,
                 'side' => strtoupper($side),
                 'type' => 'MARKET',
-                'quantity' => round($quantity, $precision),
+                'quantity' => $roundedQuantity,
                 'timestamp' => (int)$timestamp
             ];
             
@@ -1201,11 +1223,13 @@ class ExchangeService
             'ETHUSDT' => 2,
             'ADAUSDT' => 0,
             'DOGEUSDT' => 0,
-            'SOLUSDT' => 1,
+            'SOLUSDT' => 1,  // SOL futures allow 1 decimal place
             'AVAXUSDT' => 1,
         ];
         
-        return $precisionMap[$symbol] ?? 0; // Default to 0 decimal places
+        $precision = $precisionMap[$symbol] ?? 1; // Default to 1 decimal place (was 0)
+        Log::info("🔧 [PRECISION] Symbol: {$symbol}, Precision: {$precision}");
+        return $precision;
     }
     
     /**
@@ -1375,14 +1399,22 @@ class ExchangeService
         // For stop loss, we need to reverse the side
         $slSide = $side === 'BUY' ? 'SELL' : 'BUY';
         
-        // Get appropriate precision for this symbol
-        $precision = $this->getFuturesQuantityPrecision($binanceSymbol);
+        // Get appropriate precision for this symbol - use higher precision for SL/TP orders
+        $precision = max(2, $this->getFuturesQuantityPrecision($binanceSymbol)); // Minimum 2 decimal places
+        
+        $roundedQuantity = round($quantity, $precision);
+        Log::info("🔧 [SL ORDER] Quantity: {$quantity}, Precision: {$precision}, Rounded: {$roundedQuantity}");
+        
+        if ($roundedQuantity <= 0) {
+            Log::error("❌ [SL ORDER] Rounded quantity is zero: {$roundedQuantity}");
+            return null;
+        }
         
         $params = [
             'symbol' => $binanceSymbol,
             'side' => $slSide,
             'type' => 'STOP_MARKET',
-            'quantity' => round($quantity, $precision),
+            'quantity' => $roundedQuantity,
             'stopPrice' => round($stopLoss, 4),
             'reduceOnly' => 'true',
             'timestamp' => (int)$timestamp
@@ -1455,14 +1487,22 @@ class ExchangeService
         // For take profit, we need to reverse the side
         $tpSide = $side === 'BUY' ? 'SELL' : 'BUY';
         
-        // Get appropriate precision for this symbol
-        $precision = $this->getFuturesQuantityPrecision($binanceSymbol);
+        // Get appropriate precision for this symbol - use higher precision for SL/TP orders
+        $precision = max(2, $this->getFuturesQuantityPrecision($binanceSymbol)); // Minimum 2 decimal places
+        
+        $roundedQuantity = round($quantity, $precision);
+        Log::info("🔧 [TP ORDER] Quantity: {$quantity}, Precision: {$precision}, Rounded: {$roundedQuantity}");
+        
+        if ($roundedQuantity <= 0) {
+            Log::error("❌ [TP ORDER] Rounded quantity is zero: {$roundedQuantity}");
+            return null;
+        }
         
         $params = [
             'symbol' => $binanceSymbol,
             'side' => $tpSide,
             'type' => 'TAKE_PROFIT_MARKET',
-            'quantity' => round($quantity, $precision),
+            'quantity' => $roundedQuantity,
             'stopPrice' => round($takeProfit, 4),
             'reduceOnly' => 'true',
             'timestamp' => (int)$timestamp
