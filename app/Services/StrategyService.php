@@ -396,10 +396,10 @@ class StrategyService
                 ];
             }
             
-            // Create SMC service instance
-            $smcService = new \App\Services\SmartMoneyConceptsService($candles);
+            // Create SMC service instance for price zone analysis (without auto-analysis)
+            $smcService = new \App\Services\SmartMoneyConceptsService($candles, false);
             
-            // Get price zones
+            // Get price zones using the new SMC methodology
             $zones = $smcService->getPriceZones();
             $currentPrice = $marketData['current_price'];
             
@@ -408,11 +408,18 @@ class StrategyService
                     'action' => 'hold',
                     'confidence' => 0,
                     'reason' => 'Insufficient swing points for SMC analysis',
+                    'smc_analysis' => [
+                        'price_zones' => $zones,
+                        'current_zone' => ['name' => 'Unknown', 'percentage' => 0],
+                        'signal' => ['action' => 'hold', 'strength' => 0, 'reason' => 'Insufficient data'],
+                        'conditions' => ['range_valid' => false, 'signal_strong' => false, 'zone_proximity' => false],
+                        'no_trade_reason' => 'Insufficient swing points for SMC analysis'
+                    ],
                     'parameters' => $params
                 ];
             }
             
-            // Get current price zone
+            // Get current price zone using the new SMC methodology
             $priceZone = $smcService->getCurrentPriceZone($currentPrice);
             
             // Prepare detailed SMC analysis for logging

@@ -14,10 +14,12 @@ class SmartMoneyConceptsService
     private array $equalHighs = [];
     private array $equalLows = [];
 
-    public function __construct(array $candles)
+    public function __construct(array $candles, bool $autoAnalyze = true)
     {
         $this->candles = $candles;
-        $this->analyzeStructure();
+        if ($autoAnalyze) {
+            $this->analyzeStructure();
+        }
     }
 
     /**
@@ -719,6 +721,11 @@ class SmartMoneyConceptsService
      */
     public function getPriceZones(): array
     {
+        // If swing points haven't been identified yet, identify them now
+        if (empty($this->swingHighs) || empty($this->swingLows)) {
+            $this->identifySwingPoints();
+        }
+        
         if (empty($this->swingHighs) || empty($this->swingLows)) {
             return [
                 'discount' => null,

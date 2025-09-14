@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\FuturesTradingBot;
-use App\Services\FuturesTradingBotService;
+use App\Services\SimpleFuturesTradingBotService;
 use Illuminate\Console\Command;
 
 class RunFuturesTradingBots extends Command
@@ -62,7 +62,7 @@ class RunFuturesTradingBots extends Command
         $this->info("Running futures trading bot: {$bot->name}");
         
         try {
-            $service = new FuturesTradingBotService($bot);
+            $service = new SimpleFuturesTradingBotService($bot);
             $service->run();
             
             $this->info("✅ Futures trading bot '{$bot->name}' executed successfully");
@@ -90,7 +90,7 @@ class RunFuturesTradingBots extends Command
 
         foreach ($bots as $bot) {
             try {
-                $service = new FuturesTradingBotService($bot);
+                $service = new SimpleFuturesTradingBotService($bot);
                 $service->run();
                 
                 $this->line(" ✅ {$bot->name}");
