@@ -303,8 +303,17 @@ class ExchangeService
             $futuresResponse = Http::get($futuresUrl);
             if ($futuresResponse->successful()) {
                 $data = $futuresResponse->json();
-                if (isset($data['data']['price'])) {
-                    return (float)$data['data']['price'];
+                if (isset($data['data'])) {
+                    // Support alternative fields just in case ('price', 'last', 'lastTradePrice')
+                    if (isset($data['data']['price'])) {
+                        return (float)$data['data']['price'];
+                    }
+                    if (isset($data['data']['last'])) {
+                        return (float)$data['data']['last'];
+                    }
+                    if (isset($data['data']['lastTradePrice'])) {
+                        return (float)$data['data']['lastTradePrice'];
+                    }
                 }
             }
             Log::warning("KuCoin Futures ticker failed for {$futuresSymbol}. Response: " . $futuresResponse->body());
@@ -643,8 +652,9 @@ class ExchangeService
         if ($granularity !== null) {
             $url = 'https://api-futures.kucoin.com/api/v1/kline/query';
 
-            $to = (int) round(microtime(true) * 1000);
-            $from = $to - ($limit * $granularity * 60 * 1000);
+            // Use seconds for from/to to match KuCoin Futures API expectations
+            $to = (int) time();
+            $from = $to - ($limit * $granularity * 60);
 
             $params = [
                 'symbol' => $futuresSymbol,
@@ -676,8 +686,11 @@ class ExchangeService
                     }
                 }
 
-                Log::info("Successfully fetched " . count($candles) . " KuCoin Futures candlesticks for {$futuresSymbol} with granularity {$granularity}");
-                return array_reverse($candles);
+                if (count($candles) > 0) {
+                    Log::info("Successfully fetched " . count($candles) . " KuCoin Futures candlesticks for {$futuresSymbol} with granularity {$granularity}");
+                    return array_reverse($candles);
+                }
+                Log::warning("KuCoin Futures K-line returned empty data for {$futuresSymbol} (granularity {$granularity}). Falling back to spot endpoint.");
             }
 
             Log::warning("KuCoin Futures K-line request failed for {$futuresSymbol} (granularity {$granularity}). Falling back to spot endpoint. Status: {$response->status()}, Response: {$response->body()}");
@@ -686,10 +699,30 @@ class ExchangeService
 
         // Fallback to spot candlesticks endpoint (expects type like 1hour/1day)
         $url = "https://api.kucoin.com/api/v1/market/candles";
+
+        // Compute time range for spot candles using seconds
+        $spotIntervalSecondsMap = [
+            '1minute' => 60,
+            '5minute' => 5 * 60,
+            '15minute' => 15 * 60,
+            '30minute' => 30 * 60,
+            '1hour' => 60 * 60,
+            '4hour' => 4 * 60 * 60,
+            '1day' => 24 * 60 * 60,
+        ];
+        // Fallback if a minute-style string (e.g., '1m') slips through
+        if (!isset($spotIntervalSecondsMap[$interval]) && isset($intervalMap[$interval])) {
+            $spotIntervalSecondsMap[$interval] = $intervalMap[$interval] * 60;
+        }
+
+        $spotTo = time();
+        $spotFrom = $spotTo - ($limit * ($spotIntervalSecondsMap[$interval] ?? 60 * 60));
+
         $params = [
             'symbol' => $symbol,
             'type' => $interval,
-            'limit' => $limit
+            'startAt' => $spotFrom,
+            'endAt' => $spotTo,
         ];
 
         Log::info("Making KuCoin Spot request to: {$url} with params: " . json_encode($params));
@@ -715,8 +748,11 @@ class ExchangeService
                 }
             }
 
-            Log::info("Successfully fetched " . count($candles) . " KuCoin Spot candlesticks for {$symbol} with interval {$interval}");
-            return array_reverse($candles); // Return in chronological order
+            if (count($candles) > 0) {
+                Log::info("Successfully fetched " . count($candles) . " KuCoin Spot candlesticks for {$symbol} with interval {$interval}");
+                return array_reverse($candles); // Return in chronological order
+            }
+            Log::warning("KuCoin Spot candles returned empty data for {$symbol} with interval {$interval}.");
         }
 
         Log::error("Failed to fetch KuCoin Spot candles for {$symbol} with interval {$interval}. Status: {$response->status()}, Response: {$response->body()}");
